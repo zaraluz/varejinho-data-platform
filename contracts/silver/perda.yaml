@@ -1,0 +1,20 @@
+table: varejinho_silver.perda
+owner: zara.louise
+description: Registros de perdas e quebras por produto e loja
+sla_freshness_hours: 24
+grain: [id]
+
+columns:
+  - {name: id,                type: bigint,        nullable: false, unique: true}
+  - {name: id_produto,        type: int,           nullable: false}
+  - {name: id_loja,           type: int,           nullable: false}
+  - {name: data,              type: timestamp,     nullable: false}
+  - {name: quantidade,        type: decimal(14,3), nullable: false, min: 0}
+  - {name: valor,             type: decimal(14,2), nullable: false, min: 0}
+  - {name: id_tipomotivoperda, type: int,          nullable: false}
+
+quality_rules:
+  - {rule: no_duplicates, key: [id],                                                            severity: error}
+  - {rule: not_null,      columns: [id, id_produto, id_loja, data, quantidade, valor],          severity: error}
+  - {rule: referential_integrity, column: id_produto, references: varejinho_silver.produto.id, severity: warning}
+  - {rule: referential_integrity, column: id_loja,    references: varejinho_silver.loja.id,    severity: warning}
