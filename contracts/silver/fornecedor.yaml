@@ -1,0 +1,19 @@
+table: varejinho_silver.fornecedor
+owner: zara.louise
+description: Cadastro de fornecedores com SCD Tipo 2 - versoes historicas preservadas
+sla_freshness_hours: 24
+grain: [id, valid_from]
+
+columns:
+  - {name: id,           type: int,       nullable: false}
+  - {name: razaosocial,  type: string,    nullable: false}
+  - {name: cnpj,         type: string,    nullable: true}
+  - {name: situacao,     type: int,       nullable: false}
+  - {name: valid_from,   type: timestamp, nullable: false}
+  - {name: valid_to,     type: timestamp, nullable: true}
+  - {name: is_current,   type: boolean,   nullable: false}
+  - {name: hash_versao,  type: string,    nullable: false}
+
+quality_rules:
+  - {rule: no_duplicates, key: [id, valid_from], severity: error}
+  - {rule: not_null,      columns: [id, razaosocial, valid_from, is_current, hash_versao], severity: error}
