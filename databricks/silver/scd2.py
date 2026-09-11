@@ -5,13 +5,25 @@ from delta.tables import DeltaTable
 # Colunas de negócio que definem uma "versão" de cada dimensão
 SCD2_CONFIG = {
     "produto": [
-        "descricao", "id_mercadologico", "id_curvaabc", "situacao"
+        "descricaocompleta",
+        "descricaoreduzida",
+        "mercadologico1",
+        "mercadologico2",
+        "mercadologico3",
+        "ncm1",
     ],
     "fornecedor": [
-        "razaosocial", "nomefantasia", "cnpj", "situacao"
+        "razaosocial",
+        "nomefantasia",
+        "cnpj",
+        "id_situacaocadastro",
     ],
     "mercadologico": [
-        "descricao", "id_pai", "nivel"
+        "descricao",
+        "mercadologico1",
+        "mercadologico2",
+        "mercadologico3",
+        "nivel",
     ],
 }
 
