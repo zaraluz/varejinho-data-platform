@@ -1,0 +1,17 @@
+table: varejinho_silver.notaentrada
+owner: zara.louise
+description: Notas fiscais de entrada, deduplicadas por chave composta real
+sla_freshness_hours: 8
+grain: [numeronota, id_loja, id_fornecedor]
+
+columns:
+  - {name: numeronota,    type: string,        nullable: false}
+  - {name: id_loja,       type: int,           nullable: false}
+  - {name: id_fornecedor, type: int,           nullable: false}
+  - {name: dataentrada,   type: timestamp,     nullable: false}
+  - {name: valortotal,    type: decimal(14,2), nullable: false, min: 0}
+
+quality_rules:
+  - {rule: no_duplicates, key: [numeronota, id_loja, id_fornecedor], severity: error}
+  - {rule: not_null,      columns: [numeronota, id_loja, id_fornecedor, dataentrada], severity: error}
+  - {rule: freshness,     column: dataentrada, max_age_hours: 24, severity: warning}
