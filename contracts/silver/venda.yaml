@@ -1,0 +1,20 @@
+table: varejinho_silver.venda
+owner: zara.louise
+description: Transacoes de venda no PDV, deduplicadas e tipadas
+sla_freshness_hours: 8
+grain: [id]
+
+columns:
+  - {name: id,          type: bigint,        nullable: false, unique: true}
+  - {name: data,        type: timestamp,     nullable: false}
+  - {name: id_loja,     type: int,           nullable: false}
+  - {name: id_produto,  type: int,           nullable: false}
+  - {name: valor_total, type: decimal(12,2), nullable: false, min: 0}
+  - {name: quantidade,  type: decimal(12,3), nullable: false}
+
+quality_rules:
+  - {rule: no_duplicates,         key: [id],                                                    severity: error}
+  - {rule: not_null,              columns: [id, data, id_loja, id_produto, valor_total],         severity: error}
+  - {rule: referential_integrity, column: id_loja,    references: varejinho_silver.loja.id,     severity: warning}
+  - {rule: referential_integrity, column: id_produto, references: varejinho_silver.produto.id,  severity: warning}
+  - {rule: freshness,             column: data,        max_age_hours: 24,                        severity: warning}
