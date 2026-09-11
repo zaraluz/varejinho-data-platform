@@ -1,0 +1,19 @@
+table: varejinho_silver.pedido
+owner: zara.louise
+description: Pedidos de compra com status de entrega
+sla_freshness_hours: 8
+grain: [id]
+
+columns:
+  - {name: id,              type: bigint,    nullable: false, unique: true}
+  - {name: id_fornecedor,   type: int,       nullable: false}
+  - {name: id_loja,         type: int,       nullable: false}
+  - {name: datacompra,      type: timestamp, nullable: false}
+  - {name: id_tipopedido,   type: int,       nullable: false}
+  - {name: id_situacaopedido, type: int,     nullable: false}
+
+quality_rules:
+  - {rule: no_duplicates, key: [id],                                                               severity: error}
+  - {rule: not_null,      columns: [id, id_fornecedor, id_loja, datacompra],                       severity: error}
+  - {rule: referential_integrity, column: id_fornecedor, references: varejinho_silver.fornecedor.id, severity: warning}
+  - {rule: referential_integrity, column: id_loja,       references: varejinho_silver.loja.id,      severity: warning}
