@@ -76,14 +76,17 @@ def transformar(tabela: str, spark, dbutils, ultima_particao: str = None):
     if df.isEmpty():
         print(f"[{tabela}] Nenhum dado novo. Encerrando.")
         return
+    
+    # 2. Schema drift
+    detectar_drift(tabela, df, dbutils, spark)
 
-    # 2. Cast de decimais brasileiros
+    # 3. Cast de decimais brasileiros
     for col in cfg["decimais"]:
         if col in df.columns:
             df = df.withColumn(col,
                 F.regexp_replace(F.col(col), ",", ".").cast("decimal(14,3)"))
 
-    # 3. Cast de timestamp e derivação de ano/mes
+    # 4. Cast de timestamp e derivação de ano/mes
     if cfg["data"] and cfg["data"] in df.columns:
         df = (df
             .withColumn(cfg["data"],
@@ -91,8 +94,7 @@ def transformar(tabela: str, spark, dbutils, ultima_particao: str = None):
             .withColumn("ano", F.year(cfg["data"]))
             .withColumn("mes", F.month(cfg["data"])))
 
-    # 4. Schema drift
-    detectar_drift(tabela, df, dbutils, spark)
+
 
     # 5. Contrato — só se o arquivo existir
     try:
