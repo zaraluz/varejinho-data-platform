@@ -1,4 +1,4 @@
-table: varejinho_silver.produto
+table: varejinho.silver.produto
 owner: zara.louise
 description: Cadastro de produtos com SCD Tipo 2 - versoes historicas preservadas
 sla_freshness_hours: 24

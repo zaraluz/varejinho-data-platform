@@ -1,4 +1,4 @@
-table: varejinho_silver.pedido
+table: varejinho.silver.pedido
 owner: zara.louise
 description: Pedidos de compra com status de entrega
 sla_freshness_hours: 8
@@ -15,5 +15,5 @@ columns:
 quality_rules:
   - {rule: no_duplicates, key: [id],                                                               severity: error}
   - {rule: not_null,      columns: [id, id_fornecedor, id_loja, datacompra],                       severity: error}
-  - {rule: referential_integrity, column: id_fornecedor, references: varejinho_silver.fornecedor.id, severity: warning}
-  - {rule: referential_integrity, column: id_loja,       references: varejinho_silver.loja.id,      severity: warning}
+  - {rule: referential_integrity, column: id_fornecedor, references: varejinho.silver.fornecedor.id, severity: warning}
+  - {rule: referential_integrity, column: id_loja,       references: varejinho.silver.loja.id,      severity: warning}

@@ -1,4 +1,4 @@
-table: varejinho_silver.fornecedor
+table: varejinho.silver.fornecedor
 owner: zara.louise
 description: Cadastro de fornecedores com SCD Tipo 2 - versoes historicas preservadas
 sla_freshness_hours: 24

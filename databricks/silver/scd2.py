@@ -45,8 +45,8 @@ def aplicar_scd2(tabela: str, spark):
     Insere nova versão com valid_from = agora.
     """
     cols = SCD2_CONFIG[tabela]
-    BRONZE = f"varejinho_bronze.{tabela}"
-    SILVER = f"varejinho_silver.{tabela}"
+    BRONZE = f"varejinho.bronze.{tabela}"
+    SILVER = f"varejinho.silver.{tabela}"
 
     df_novo = (
         spark.table(BRONZE)
@@ -111,8 +111,8 @@ def aplicar_scd1(tabela: str, spark):
     SCD Tipo 1 — overwrite simples para domínios e tabelas estáticas.
     Não preserva histórico.
     """
-    BRONZE = f"varejinho_bronze.{tabela}"
-    SILVER = f"varejinho_silver.{tabela}"
+    BRONZE = f"varejinho.bronze.{tabela}"
+    SILVER = f"varejinho.silver.{tabela}"
 
     df = (
         spark.table(BRONZE)

@@ -1,4 +1,4 @@
-table: varejinho_silver.promocao
+table: varejinho.silver.promocao
 owner: zara.louise
 description: Promocoes ativas e futuras - full load diario, inclui datas futuras
 sla_freshness_hours: 24
@@ -15,4 +15,4 @@ columns:
 quality_rules:
   - {rule: no_duplicates, key: [id],                               severity: error}
   - {rule: not_null,      columns: [id, id_loja, datainicio, datatermino], severity: error}
-  - {rule: referential_integrity, column: id_loja, references: varejinho_silver.loja.id, severity: warning}
+  - {rule: referential_integrity, column: id_loja, references: varejinho.silver.loja.id, severity: warning}
