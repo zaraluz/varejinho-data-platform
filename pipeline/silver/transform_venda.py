@@ -24,7 +24,11 @@ def transformar_venda(spark, dbutils, ultima_particao: str = None):
         print("[venda] Nenhum dado novo na Bronze. Encerrando.")
         return
 
-    # 2. Cast de tipos
+
+    # 2. Schema drift
+    detectar_drift("venda", df, dbutils, spark)
+
+    # 3. Cast de tipos
     df_typed = (
         df
         .withColumn("valortotal",
@@ -38,9 +42,6 @@ def transformar_venda(spark, dbutils, ultima_particao: str = None):
         # renomeia para bater com o contrato
         .withColumnRenamed("valortotal", "valor_total")
     )
-
-    # 3. Schema drift
-    detectar_drift("venda", df_typed, dbutils, spark)
 
     # 4. Contrato
     validator = ContractValidator(CONTRACT)
