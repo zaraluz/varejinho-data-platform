@@ -1,4 +1,4 @@
-table: varejinho_silver.notaentradaitem
+table: varejinho.silver.notaentradaitem
 owner: zara.louise
 description: Itens de notas fiscais de entrada, filtrados via notaentrada
 sla_freshness_hours: 8
@@ -14,4 +14,4 @@ columns:
 quality_rules:
   - {rule: no_duplicates, key: [id],                                                         severity: error}
   - {rule: not_null,      columns: [id, id_notaentrada, id_produto, quantidade],             severity: error}
-  - {rule: referential_integrity, column: id_produto, references: varejinho_silver.produto.id, severity: warning}
+  - {rule: referential_integrity, column: id_produto, references: varejinho.silver.produto.id, severity: warning}

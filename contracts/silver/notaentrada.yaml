@@ -1,4 +1,4 @@
-table: varejinho_silver.notaentrada
+table: varejinho.silver.notaentrada
 owner: zara.louise
 description: Notas fiscais de entrada, deduplicadas por chave composta real
 sla_freshness_hours: 8

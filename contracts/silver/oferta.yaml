@@ -1,4 +1,4 @@
-table: varejinho_silver.oferta
+table: varejinho.silver.oferta
 owner: zara.louise
 description: Ofertas ativas e futuras - full load diario, inclui datas futuras
 sla_freshness_hours: 24
@@ -15,5 +15,5 @@ columns:
 quality_rules:
   - {rule: no_duplicates, key: [id],                                                            severity: error}
   - {rule: not_null,      columns: [id, id_produto, id_loja, datainicio, datatermino, preco],   severity: error}
-  - {rule: referential_integrity, column: id_produto, references: varejinho_silver.produto.id, severity: warning}
-  - {rule: referential_integrity, column: id_loja,    references: varejinho_silver.loja.id,    severity: warning}
+  - {rule: referential_integrity, column: id_produto, references: varejinho.silver.produto.id, severity: warning}
+  - {rule: referential_integrity, column: id_loja,    references: varejinho.silver.loja.id,    severity: warning}

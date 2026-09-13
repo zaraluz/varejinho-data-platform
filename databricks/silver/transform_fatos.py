@@ -3,12 +3,12 @@ from pyspark.sql import functions as F
 from pyspark.sql.window import Window
 from delta.tables import DeltaTable
 import sys
-sys.path.append("/Workspace/Repos/zaraluz/varejinho-data-platform")
+sys.path.append("/Workspace/Users/<USER>/varejinho-data-platform")
 
 from quality.contract_engine import ContractValidator
 from databricks.silver.schema_drift import detectar_drift
 
-REPO = "/Workspace/Repos/zaraluz/varejinho-data-platform"
+REPO = "/Workspace/Users/<USER>/varejinho-data-platform"
 
 # Configuração por tabela: chave de dedup, coluna de data e decimais a converter
 CONFIG = {
@@ -63,9 +63,9 @@ CONFIG = {
 def transformar(tabela: str, spark, dbutils, ultima_particao: str = None):
 
     cfg = CONFIG[tabela]
-    BRONZE     = f"varejinho_bronze.{tabela}"
-    SILVER     = f"varejinho_silver.{tabela}"
-    QUARENTENA = f"varejinho_silver._quarantine_{tabela}"
+    BRONZE     = f"varejinho.bronze.{tabela}"
+    SILVER     = f"varejinho.silver.{tabela}"
+    QUARENTENA = f"varejinho.silver._quarantine_{tabela}"
     CONTRACT   = f"{REPO}/contracts/silver/{tabela}.yaml"
 
     # 1. Leitura incremental

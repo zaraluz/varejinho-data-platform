@@ -3,15 +3,15 @@ from pyspark.sql import functions as F
 from pyspark.sql.window import Window
 from delta.tables import DeltaTable
 import sys
-sys.path.append("/Workspace/Repos/zaraluz/varejinho-data-platform")
+sys.path.append("/Workspace/Users/<USER>/varejinho-data-platform")
 
 from quality.contract_engine import ContractValidator
 from databricks.silver.schema_drift import detectar_drift
 
-BRONZE  = "varejinho_bronze.venda"
-SILVER  = "varejinho_silver.venda"
-QUARENTENA = "varejinho_silver._quarantine_venda"
-CONTRACT   = "/Workspace/Repos/zaraluz/varejinho-data-platform/contracts/silver/venda.yaml"
+BRONZE     = "varejinho.bronze.venda"
+SILVER     = "varejinho.silver.venda"
+QUARENTENA = "varejinho.silver._quarantine_venda"
+CONTRACT   = "/Workspace/Users/<USER>/varejinho-data-platform/contracts/silver/venda.yaml"
 
 def transformar_venda(spark, dbutils, ultima_particao: str = None):
 

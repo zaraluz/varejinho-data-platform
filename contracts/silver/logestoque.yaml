@@ -1,4 +1,4 @@
-table: varejinho_silver.logestoque
+table: varejinho.silver.logestoque
 owner: zara.louise
 description: Log de movimentacoes de estoque por produto e loja
 sla_freshness_hours: 8
@@ -15,5 +15,5 @@ columns:
 quality_rules:
   - {rule: no_duplicates, key: [id],                                                            severity: error}
   - {rule: not_null,      columns: [id, id_produto, id_loja, datamovimento, quantidade],        severity: error}
-  - {rule: referential_integrity, column: id_produto, references: varejinho_silver.produto.id, severity: warning}
-  - {rule: referential_integrity, column: id_loja,    references: varejinho_silver.loja.id,    severity: warning}
+  - {rule: referential_integrity, column: id_produto, references: varejinho.silver.produto.id, severity: warning}
+  - {rule: referential_integrity, column: id_loja,    references: varejinho.silver.loja.id,    severity: warning}
