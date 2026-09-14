@@ -68,6 +68,7 @@ CONFIG = {
         "chave":    ["id"],
         "data":     "datavencimento",
         "decimais": ["valor", "valoracrescimo"],
+        "datas_extras": ["datapagamento", "datapagamentocontabil"],
     },
     "pagaroutrasdespesas": {
         "chave":    ["id"],
@@ -115,7 +116,12 @@ def transformar(tabela: str, spark, dbutils, ultima_particao: str = None):
                 F.to_timestamp(F.col(cfg["data"]), "yyyy/MM/dd HH:mm:ss.SSS"))
             .withColumn("ano", F.year(cfg["data"]))
             .withColumn("mes", F.month(cfg["data"])))
-
+        
+    # 4b. Cast de datas extras (nullable — usar try_to_timestamp)
+    for col_extra in cfg.get("datas_extras", []):
+        if col_extra in df.columns:
+            df = df.withColumn(col_extra,
+                F.expr(f"try_to_timestamp(`{col_extra}`, 'yyyy/MM/dd HH:mm:ss.SSS')"))
 
 
     # 5. Contrato — só se o arquivo existir
