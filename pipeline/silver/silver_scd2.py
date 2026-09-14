@@ -1,21 +1,23 @@
-# pipeline/silver/silver_scd2.py
-# SCD Tipo 2 para dimensões mutáveis + SCD Tipo 1 para domínios + curvaabc snapshot
-# ATENÇÃO: código inline nos notebooks do Databricks por limitação de imports em serverless
-# Este arquivo é a versão versionada para o repositório
-
 from pyspark.sql import functions as F
 from delta.tables import DeltaTable
 
 SCD2_CONFIG = {
-    "produto":       ["descricaocompleta","descricaoreduzida","mercadologico1","mercadologico2","mercadologico3","ncm1"],
-    "fornecedor":    ["razaosocial","nomefantasia","cnpj","id_situacaocadastro"],
-    "mercadologico": ["descricao","mercadologico1","mercadologico2","mercadologico3","nivel"],
+    "produto":       {
+        "cols": ["descricaocompleta","descricaoreduzida","mercadologico1","mercadologico2","mercadologico3","ncm1"],
+        "valid_from_col": "datacadastro",
+    },
+    "fornecedor":    {
+        "cols": ["razaosocial","nomefantasia","cnpj","id_situacaocadastro"],
+        "valid_from_col": "datacadastro",
+    },
+    "mercadologico": {
+        "cols": ["descricao","mercadologico1","mercadologico2","mercadologico3","nivel"],
+        "valid_from_col": None,
+    },
 }
 
 SCD1_TABELAS = [
-    # Originais
     "loja", "produtofornecedor", "tipocurvaabc", "tipomotivoperda", "tipopedido", "tipopromocao",
-    # Domínios adicionados
     "situacaocadastro", "situacaonotaentrada", "situacaopagarfornecedorparcela",
     "situacaopagaroutrasdespesas", "situacaopedido", "tipoembalagem", "tipoentrada",
     "tipofornecedor", "tipomercadoria", "tipomovimentacao", "tipooferta",
@@ -25,38 +27,37 @@ SCD1_TABELAS = [
 resultados = []
 
 # SCD2
-for tabela, cols in SCD2_CONFIG.items():
+for tabela, cfg in SCD2_CONFIG.items():
     try:
         BRONZE = f"varejinho.bronze.{tabela}"
         SILVER = f"varejinho.silver.{tabela}"
 
         ultima = spark.table(BRONZE).agg(F.max("ingestion_date")).collect()[0][0]
-        df_novo = (spark.table(BRONZE)
-            .where(F.col("ingestion_date") == ultima)
+        df_bronze = spark.table(BRONZE).where(F.col("ingestion_date") == ultima)
+
+        # valid_from: data real do ERP ou fallback 2020-01-01
+        if cfg["valid_from_col"]:
+            df_bronze = df_bronze.withColumn("valid_from",
+                F.to_timestamp(F.col(cfg["valid_from_col"]), "yyyy/MM/dd HH:mm:ss.SSSSSSSSS"))
+        else:
+            df_bronze = df_bronze.withColumn("valid_from",
+                F.lit("2020-01-01").cast("timestamp"))
+
+        df_novo = (df_bronze
             .withColumn("hash_versao",
                 F.md5(F.concat_ws("||",
-                    *[F.coalesce(F.col(c).cast("string"), F.lit("<NULL>")) for c in cols])))
-            .withColumn("valid_from", F.current_timestamp())
+                    *[F.coalesce(F.col(c).cast("string"), F.lit("<NULL>")) for c in cfg["cols"]])))
             .withColumn("valid_to",   F.lit(None).cast("timestamp"))
             .withColumn("is_current", F.lit(True)))
 
-        if not spark.catalog.tableExists(SILVER):
-            df_novo.write.format("delta").saveAsTable(SILVER)
-            count = spark.table(SILVER).count()
-            resultados.append(f"✅ {tabela} SCD2 carga inicial: {count:,}")
-        else:
-            t = DeltaTable.forName(spark, SILVER)
-            (t.alias("t")
-                .merge(df_novo.alias("s"), "t.id = s.id AND t.is_current = true")
-                .whenMatchedUpdate(
-                    condition="t.hash_versao <> s.hash_versao",
-                    set={"valid_to": "s.valid_from", "is_current": "false"})
-                .whenNotMatchedInsertAll()
-                .execute())
-            count = spark.table(SILVER).count()
-            resultados.append(f"✅ {tabela} SCD2 atualizado: {count:,}")
+        # Drop e recria — fix de valid_from exige reprocessamento completo
+        spark.sql(f"DROP TABLE IF EXISTS {SILVER}")
+        df_novo.write.format("delta").saveAsTable(SILVER)
+        count = spark.table(SILVER).count()
+        resultados.append(f"✅ {tabela} SCD2 reprocessado: {count:,}")
+
     except Exception as e:
-        resultados.append(f"❌ {tabela}: {str(e)[:120]}")
+        resultados.append(f"❌ {tabela}: {str(e)[:150]}")
 
 # SCD1
 for tabela in SCD1_TABELAS:
@@ -70,7 +71,7 @@ for tabela in SCD1_TABELAS:
         count = spark.table(SILVER).count()
         resultados.append(f"✅ {tabela} SCD1: {count:,}")
     except Exception as e:
-        resultados.append(f"❌ {tabela}: {str(e)[:120]}")
+        resultados.append(f"❌ {tabela}: {str(e)[:150]}")
 
 # CURVAABC — fato snapshot
 try:
@@ -120,7 +121,7 @@ try:
     resultados.append(f"✅ curvaabc snapshot: {count:,} linhas | {snapshots} snapshots | {produtos:,} produtos")
 
 except Exception as e:
-    resultados.append(f"❌ curvaabc: {str(e)[:120]}")
+    resultados.append(f"❌ curvaabc: {str(e)[:150]}")
 
 print("\n=== RESULTADO ===")
 for r in resultados:
