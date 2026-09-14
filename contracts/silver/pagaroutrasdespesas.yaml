@@ -1,0 +1,17 @@
+table: varejinho.silver.pagaroutrasdespesas
+owner: zara.louise
+description: Contas a pagar — outras despesas operacionais
+sla_freshness_hours: 24
+grain: [id]
+
+columns:
+  - {name: id,             type: bigint,       nullable: false, unique: true}
+  - {name: id_loja,        type: int,          nullable: false}
+  - {name: id_fornecedor,  type: int,          nullable: true}
+  - {name: dataemissao,    type: timestamp,    nullable: false}
+  - {name: valor,          type: decimal(14,2),nullable: false, min: 0}
+
+quality_rules:
+  - {rule: no_duplicates,  key: [id],              severity: error}
+  - {rule: not_null,       columns: [id, id_loja, dataemissao, valor], severity: error}
+  - {rule: referential_integrity, column: id_loja, references: varejinho.silver.loja.id, severity: warning}
