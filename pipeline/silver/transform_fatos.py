@@ -30,8 +30,10 @@ CONFIG = {
     "logestoque": {
         "chave":    ["id"],
         "data":     "datamovimento",
-        "decimais": ["quantidade"],
-    },
+        "decimais": ["quantidade", "estoqueanterior", "estoqueatual", 
+                    "custocomimposto", "custosemimposto", 
+                    "customediocomimposto", "customediosemimposto"],
+},
     "promocao": {
         "chave":    ["id"],
         "data":     "datainicio",
