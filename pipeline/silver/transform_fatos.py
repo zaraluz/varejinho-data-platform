@@ -57,7 +57,7 @@ CONFIG = {
     "oferta": {
         "chave":    ["id"],
         "data":     "datainicio",
-        "decimais": ["preco"],
+        "decimais": ["precooferta", "preconormal", "precoimediato"],
     },
         "pagarfornecedor": {
         "chave":    ["id"],
