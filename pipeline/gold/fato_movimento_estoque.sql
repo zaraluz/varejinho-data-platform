@@ -4,7 +4,6 @@
 -- Join temporal com dim_produto SCD2 — versão vigente na data da movimentação
 -- Partição: ano/mes da data da movimentação
 -- Cobre lojas e CD — diferente da tabela estoque que não cobria o CD
--- Decimais castados na Gold — logestoque chegou como string da Silver
 
 CREATE OR REPLACE TABLE varejinho.gold.fato_movimento_estoque
 USING DELTA
@@ -19,15 +18,14 @@ SELECT
     le.id_tipoentradasaida,
     le.id                                                                    AS id_movimento,
     le.id_venda,
-    CAST(REPLACE(le.quantidade,           ',', '.') AS DECIMAL(14,3))       AS quantidade,
-    CAST(REPLACE(le.estoqueanterior,      ',', '.') AS DECIMAL(14,3))       AS estoqueanterior,
-    CAST(REPLACE(le.estoqueatual,         ',', '.') AS DECIMAL(14,3))       AS estoqueatual,
-    CAST(REPLACE(le.estoqueatual,         ',', '.') AS DECIMAL(14,3)) -
-    CAST(REPLACE(le.estoqueanterior,      ',', '.') AS DECIMAL(14,3))       AS variacao_estoque,
-    CAST(REPLACE(le.custocomimposto,      ',', '.') AS DECIMAL(14,3))       AS custocomimposto,
-    CAST(REPLACE(le.custosemimposto,      ',', '.') AS DECIMAL(14,3))       AS custosemimposto,
-    CAST(REPLACE(le.customediocomimposto, ',', '.') AS DECIMAL(14,3))       AS customediocomimposto,
-    CAST(REPLACE(le.customediosemimposto, ',', '.') AS DECIMAL(14,3))       AS customediosemimposto,
+    le.quantidade,
+    le.estoqueanterior,
+    le.estoqueatual,
+    le.estoqueatual - le.estoqueanterior                                     AS variacao_estoque,
+    le.custocomimposto,
+    le.custosemimposto,
+    le.customediocomimposto,
+    le.customediosemimposto,
     le.ano,
     le.mes
 FROM varejinho.silver.logestoque le
