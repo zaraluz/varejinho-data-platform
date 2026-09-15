@@ -1,0 +1,105 @@
+# pipeline/bundle.yml
+# Databricks Asset Bundle — Varejinho Data Platform
+# Deploy: databricks bundle deploy --target prod
+# Run manual: databricks bundle run pipeline_diario --target prod
+
+bundle:
+  name: varejinho-data-platform
+
+variables:
+  catalog:
+    description: Catálogo alvo por ambiente
+    default: varejinho
+
+targets:
+  dev:
+    mode: development
+    default: true
+    variables:
+      catalog: varejinho_dev
+
+  prod:
+    mode: production
+    variables:
+      catalog: varejinho
+
+resources:
+  jobs:
+
+    # ── JOB 1 — Pipeline diário (6h, 12h, 20h) ──────────────
+    pipeline_diario:
+      name: "[${bundle.target}] Varejinho — Pipeline Diário"
+
+      schedule:
+        quartz_cron_expression: "0 0 6,12,20 * * ?"
+        timezone_id: "America/Fortaleza"
+        pause_status: UNPAUSED
+
+      email_notifications:
+        on_failure:
+          - zara.louise@grupovarejinho.com.br
+
+      max_concurrent_runs: 1
+
+      tasks:
+        - task_key: bronze_quality_gate
+          notebook_task:
+            notebook_path: ./pipeline/bronze/quality_gate
+          description: "Valida Bronze antes de processar Silver"
+
+        - task_key: silver_scd2
+          depends_on:
+            - task_key: bronze_quality_gate
+          notebook_task:
+            notebook_path: ./pipeline/silver/silver_scd2
+          description: "SCD2 dimensões + SCD1 domínios + curvaabc snapshot"
+
+        - task_key: silver_fatos
+          depends_on:
+            - task_key: bronze_quality_gate
+          notebook_task:
+            notebook_path: ./pipeline/silver/transform_fatos
+          description: "Fatos transacionais e financeiros"
+
+        - task_key: gold_dimensoes
+          depends_on:
+            - task_key: silver_scd2
+          notebook_task:
+            notebook_path: ./pipeline/gold/gold_dimensoes
+          description: "dim_produto, dim_fornecedor, dim_mercadologico, dim_loja, dim_tempo"
+
+        - task_key: gold_fatos
+          depends_on:
+            - task_key: silver_fatos
+            - task_key: gold_dimensoes
+          notebook_task:
+            notebook_path: ./pipeline/gold/gold_fatos
+          description: "Todos os fatos da Gold"
+
+        - task_key: gold_quality_gate
+          depends_on:
+            - task_key: gold_fatos
+          notebook_task:
+            notebook_path: ./pipeline/gold/quality_gate
+          description: "35 checks — falha bloqueia e envia alerta"
+
+    # ── JOB 2 — Manutenção semanal (domingo 2h) ──────────────
+    manutencao_semanal:
+      name: "[${bundle.target}] Varejinho — Manutenção Semanal"
+
+      schedule:
+        quartz_cron_expression: "0 0 2 ? * SUN"
+        timezone_id: "America/Fortaleza"
+        pause_status: UNPAUSED
+
+      email_notifications:
+        on_failure:
+          - zara.louise@grupovarejinho.com.br
+
+      max_concurrent_runs: 1
+
+      tasks:
+        - task_key: optimize_vacuum
+          notebook_task:
+            notebook_path: ./pipeline/gold/optimize_vacuum
+          description: "OPTIMIZE + ZORDER + VACUUM em todas as tabelas Gold"
