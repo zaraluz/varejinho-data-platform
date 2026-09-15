@@ -112,3 +112,30 @@ resources:
           notebook_task:
             notebook_path: /Workspace/Users/zarallouise@gmail.com/varejinho-data-platform/pipeline/gold/optimize_vacuum.py
           description: "OPTIMIZE + ZORDER + VACUUM em todas as tabelas Gold"
+
+
+    dbt_tests:
+      name: "[${bundle.target}] Varejinho — dbt Tests"
+
+      schedule:
+        quartz_cron_expression: "0 0 8,14,22 * * ?"
+        timezone_id: "America/Fortaleza"
+        pause_status: UNPAUSED
+
+      email_notifications:
+        on_failure:
+          - zara.louise@grupovarejinho.com.br
+
+      max_concurrent_runs: 1
+
+      environments:
+        - environment_key: serverless
+          spec:
+            client: "1"
+
+      tasks:
+        - task_key: dbt_test
+          environment_key: serverless
+          notebook_task:
+            notebook_path: /Workspace/Users/zarallouise@gmail.com/varejinho-data-platform/pipeline/dbt_runner.py
+          description: "dbt test — 7 testes singulares da Gold"
