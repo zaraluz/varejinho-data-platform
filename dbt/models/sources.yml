@@ -1,0 +1,57 @@
+version: 2
+
+sources:
+  - name: silver
+    catalog: varejinho
+    schema: silver
+    description: "Camada Silver — dados tipados, deduplicados e com SCD2 aplicado"
+    tables:
+      - name: venda
+        description: "Vendas do PDV — grão: 1 linha por item vendido"
+      - name: perda
+        description: "Perdas e quebras por produto e loja"
+      - name: logestoque
+        description: "Log de movimentações de estoque — cobre lojas e CD"
+      - name: pedido
+        description: "Cabeçalho dos pedidos de compra"
+      - name: pedidoitem
+        description: "Itens dos pedidos de compra — grão: 1 linha por item"
+      - name: oferta
+        description: "Ofertas por produto e loja — inclui ofertas futuras"
+      - name: promocao
+        description: "Promoções cadastradas — inclui promoções futuras"
+      - name: promocaoitem
+        description: "Itens das promoções"
+      - name: pagarfornecedorparcela
+        description: "Parcelas de pagamento a fornecedores"
+      - name: pagaroutrasdespesas
+        description: "Despesas operacionais"
+      - name: curvaabc
+        description: "Classificação ABC por produto/loja — fato snapshot"
+      - name: produto
+        description: "Dimensão produto com histórico SCD2"
+      - name: fornecedor
+        description: "Dimensão fornecedor com histórico SCD2"
+      - name: mercadologico
+        description: "Hierarquia mercadológica com histórico SCD2"
+      - name: loja
+        description: "Dimensão loja — 2 lojas + CD"
+  - name: gold
+    catalog: varejinho
+    schema: gold
+    description: "Camada Gold — Star Schema para consumo analítico"
+    tables:
+      - name: fato_vendas
+      - name: fato_compras
+      - name: fato_perdas
+      - name: fato_movimento_estoque
+      - name: fato_oferta
+      - name: fato_promocoes
+      - name: fato_contas_pagar
+      - name: fato_outras_despesas
+      - name: fato_curva_abc
+      - name: dim_produto
+      - name: dim_fornecedor
+      - name: dim_loja
+      - name: dim_mercadologico
+      - name: dim_tempo

@@ -1,0 +1,126 @@
+version: 2
+
+models:
+  - name: fato_vendas
+    description: "Fato vendas — grão: 1 linha por item vendido. Join temporal com dim_produto SCD2."
+    config:
+      contract:
+        enforced: false
+    columns:
+      - name: sk_venda
+        description: "Surrogate key — MD5(id || id_loja)"
+        tests: [not_null, unique]
+      - name: sk_produto
+        description: "FK dim_produto — NULL se produto não encontrado no join temporal"
+        tests: [not_null]
+      - name: id_loja
+        description: "FK dim_loja"
+        tests:
+          - not_null
+          - accepted_values:
+              values: [1, 2, 3]
+      - name: sk_tempo
+        description: "FK dim_tempo — YYYYMMDD como inteiro"
+        tests: [not_null]
+      - name: valor_total
+        description: "Valor total da venda"
+        tests: [not_null]
+
+  - name: fato_compras
+    description: "Fato compras — grão: 1 linha por item de pedido de compra"
+    columns:
+      - name: sk_compra
+        tests: [not_null, unique]
+      - name: sk_produto
+        tests: [not_null]
+      - name: sk_fornecedor
+        tests: [not_null]
+
+  - name: fato_perdas
+    description: "Fato perdas — grão: 1 linha por registro de perda"
+    columns:
+      - name: sk_perda
+        tests: [not_null, unique]
+      - name: sk_produto
+        tests: [not_null]
+
+  - name: fato_movimento_estoque
+    description: "Fato movimento de estoque — grão: 1 linha por movimentação. Cobre lojas e CD."
+    columns:
+      - name: sk_movimento
+        tests: [not_null, unique]
+
+  - name: fato_oferta
+    description: "Fato oferta — grão: 1 linha por produto em oferta por loja. Base para TCC de margem negativa."
+    columns:
+      - name: sk_oferta
+        tests: [not_null, unique]
+      - name: sk_produto
+        tests: [not_null]
+
+  - name: fato_promocoes
+    description: "Fato promoções — grão: 1 linha por produto em promoção"
+    columns:
+      - name: sk_promocao
+        tests: [not_null, unique]
+      - name: sk_produto
+        tests: [not_null]
+
+  - name: fato_contas_pagar
+    description: "Fato contas a pagar — grão: 1 linha por parcela. datapagamento NULL para parcelas não pagas."
+    columns:
+      - name: sk_parcela
+        tests: [not_null, unique]
+      - name: sk_fornecedor
+        tests: [not_null]
+
+  - name: fato_outras_despesas
+    description: "Fato outras despesas — grão: 1 linha por despesa operacional"
+    columns:
+      - name: sk_despesa
+        tests: [not_null, unique]
+
+  - name: fato_curva_abc
+    description: "Fato curva ABC — fato snapshot. Grão: produto/loja/snapshot_date"
+    columns:
+      - name: sk_curva
+        tests: [not_null, unique]
+      - name: sk_produto
+        tests: [not_null]
+
+  - name: dim_produto
+    description: "Dimensão produto com histórico SCD2. SK por versão: MD5(id || valid_from)"
+    columns:
+      - name: sk_produto
+        tests: [not_null, unique]
+      - name: id_produto
+        tests: [not_null]
+      - name: is_current
+        tests:
+          - not_null
+          - accepted_values:
+              values: [true, false]
+
+  - name: dim_fornecedor
+    description: "Dimensão fornecedor com histórico SCD2. CNPJ com column mask pendente."
+    columns:
+      - name: sk_fornecedor
+        tests: [not_null, unique]
+
+  - name: dim_loja
+    description: "Dimensão loja — 3 linhas: 2 lojas + CD. SK = id_loja."
+    columns:
+      - name: sk_loja
+        tests: [not_null, unique]
+        
+  - name: dim_mercadologico
+    description: "Hierarquia mercadológica com histórico SCD2"
+    columns:
+      - name: sk_mercadologico
+        tests: [not_null, unique]
+
+  - name: dim_tempo
+    description: "Dimensão tempo gerada por código — 2023-01-01 a 2027-12-31. SK = YYYYMMDD."
+    columns:
+      - name: sk_tempo
+        tests: [not_null, unique]
