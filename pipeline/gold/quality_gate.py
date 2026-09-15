@@ -175,3 +175,6 @@ total  = len(resultados)
 passou = sum(1 for r in resultados if r.startswith("✅"))
 falhou = total - passou
 print(f"\n{passou}/{total} checks passaram | {falhou} falharam")
+
+if falhou > 0:
+    raise Exception(f"Gold Quality Gate falhou: {falhou}/{total} checks com erro")
