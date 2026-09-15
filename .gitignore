@@ -1,0 +1,19 @@
+# DAB — estado local do bundle
+pipeline/.databricks/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# dbt
+dbt/target/
+dbt/logs/
+dbt/.user.yml
+
+# Logs locais
+logs/
+
+# Ambientes virtuais
+.venv/
+venv/

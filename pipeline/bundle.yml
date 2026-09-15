@@ -1,14 +1,9 @@
 # pipeline/bundle.yml
-# Databricks Asset Bundle — Varejinho Data Platform
-# Deploy: databricks bundle deploy --target prod
-# Run manual: databricks bundle run pipeline_diario --target prod
-
 bundle:
   name: varejinho-data-platform
 
 variables:
   catalog:
-    description: Catálogo alvo por ambiente
     default: varejinho
 
 targets:
@@ -17,7 +12,6 @@ targets:
     default: true
     variables:
       catalog: varejinho_dev
-
   prod:
     mode: production
     variables:
@@ -26,12 +20,11 @@ targets:
 resources:
   jobs:
 
-    # ── JOB 1 — Pipeline diário (6h, 12h, 20h) ──────────────
     pipeline_diario:
       name: "[${bundle.target}] Varejinho — Pipeline Diário"
 
       schedule:
-        quartz_cron_expression: "0 0 6,12,20 * * ?"
+        quartz_cron_expression: "0 0 7,13,21 * * ?"
         timezone_id: "America/Fortaleza"
         pause_status: UNPAUSED
 
@@ -41,55 +34,59 @@ resources:
 
       max_concurrent_runs: 1
 
+      environments:
+        - environment_key: serverless
+          spec:
+            client: "1"
+
       tasks:
         - task_key: bronze_quality_gate
+          environment_key: serverless
           notebook_task:
-            notebook_path: ./pipeline/bronze/quality_gate.py
-            source: GIT
+            notebook_path: /Workspace/Users/<USER>/varejinho-data-platform/pipeline/bronze/quality_gate.py
           description: "Valida Bronze antes de processar Silver"
 
         - task_key: silver_scd2
+          environment_key: serverless
           depends_on:
             - task_key: bronze_quality_gate
           notebook_task:
-            notebook_path: ./pipeline/silver/silver_scd2.py
-            source: GIT
+            notebook_path: /Workspace/Users/<USER>/varejinho-data-platform/pipeline/silver/silver_scd2.py
           description: "SCD2 dimensões + SCD1 domínios + curvaabc snapshot"
 
         - task_key: silver_fatos
+          environment_key: serverless
           depends_on:
             - task_key: bronze_quality_gate
           notebook_task:
-            notebook_path: ./pipeline/silver/transform_fatos.py
-            source: GIT
+            notebook_path: /Workspace/Users/<USER>/varejinho-data-platform/pipeline/silver/transform_fatos.py
           description: "Fatos transacionais e financeiros"
 
         - task_key: gold_dimensoes
+          environment_key: serverless
           depends_on:
             - task_key: silver_scd2
           notebook_task:
-            notebook_path: ./pipeline/gold/gold_dimensoes.py
-            source: GIT
-          description: "dim_produto, dim_fornecedor, dim_mercadologico, dim_loja, dim_tempo"
+            notebook_path: /Workspace/Users/<USER>/varejinho-data-platform/pipeline/gold/gold_dimensoes.py
+          description: "Dimensões da Gold"
 
         - task_key: gold_fatos
+          environment_key: serverless
           depends_on:
             - task_key: silver_fatos
             - task_key: gold_dimensoes
           notebook_task:
-            notebook_path: ./pipeline/gold/gold_fatos.py
-            source: GIT
-          description: "Todos os fatos da Gold"
+            notebook_path: /Workspace/Users/<USER>/varejinho-data-platform/pipeline/gold/gold_fatos.py
+          description: "Fatos da Gold"
 
         - task_key: gold_quality_gate
+          environment_key: serverless
           depends_on:
             - task_key: gold_fatos
           notebook_task:
-            notebook_path: ./pipeline/gold/quality_gate.py
-            source: GIT
+            notebook_path: /Workspace/Users/<USER>/varejinho-data-platform/pipeline/gold/quality_gate.py
           description: "35 checks — falha bloqueia e envia alerta"
 
-    # ── JOB 2 — Manutenção semanal (domingo 2h) ──────────────
     manutencao_semanal:
       name: "[${bundle.target}] Varejinho — Manutenção Semanal"
 
@@ -104,9 +101,14 @@ resources:
 
       max_concurrent_runs: 1
 
+      environments:
+        - environment_key: serverless
+          spec:
+            client: "1"
+
       tasks:
         - task_key: optimize_vacuum
+          environment_key: serverless
           notebook_task:
-            notebook_path: ./pipeline/gold/optimize_vacuum.py
-            source: GIT
+            notebook_path: /Workspace/Users/<USER>/varejinho-data-platform/pipeline/gold/optimize_vacuum.py
           description: "OPTIMIZE + ZORDER + VACUUM em todas as tabelas Gold"
