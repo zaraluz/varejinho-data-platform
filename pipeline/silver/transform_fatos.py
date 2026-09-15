@@ -57,6 +57,26 @@ CONFIG = {
         "data":     "datainicio",
         "decimais": ["preco"],
     },
+        "pagarfornecedor": {
+        "chave":    ["id"],
+        "data":     "dataemissao",
+        "decimais": ["valor"],
+    },
+    "pagarfornecedorparcela": {
+        "chave":    ["id"],
+        "data":     "datavencimento",
+        "decimais": ["valor", "valoracrescimo"],
+    },
+    "pagaroutrasdespesas": {
+        "chave":    ["id"],
+        "data":     "dataemissao",
+        "decimais": ["valor", "valorbruto"],
+    },
+    "pagaroutrasdespesasimposto": {
+        "chave":    ["id"],
+        "data":     "datavencimento",
+        "decimais": ["valor", "basecalculo", "aliquota"],
+    },
 }
 
 
