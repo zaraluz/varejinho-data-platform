@@ -8,7 +8,7 @@ columns:
   - {name: id,                      type: bigint,        nullable: false, unique: true}
   - {name: id_pagaroutrasdespesas,  type: bigint,        nullable: false}
   - {name: valor,                   type: decimal(14,2), nullable: false, min: 0}
-  - {name: datavencimento,          type: timestamp,     nullable: false}
+  - {name: datavencimento,          type: timestamp,     nullable: true}
   - {name: basecalculo,             type: decimal(14,2), nullable: true}
   - {name: aliquota,                type: decimal(8,4),  nullable: true}
 
