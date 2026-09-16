@@ -1,3 +1,4 @@
+# Databricks notebook source
 # pipeline/silver/transform_venda.py
 # Processa varejinho.bronze.venda → varejinho.silver.venda
 # Cast de tipos, validação de contrato, quarentena e MERGE idempotente

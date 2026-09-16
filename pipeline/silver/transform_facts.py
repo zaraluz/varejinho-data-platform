@@ -1,3 +1,4 @@
+# Databricks notebook source
 # pipeline/silver/transform_fatos.py
 # Processa todas as tabelas fato Bronze → Silver
 # Cast de tipos, schema drift, contrato, quarentena e MERGE idempotente
