@@ -1,3 +1,4 @@
+# Databricks notebook source
 # pipeline/bronze/registro_bronze.py
 # Registra as 37 tabelas da Bronze como external tables no Unity Catalog
 # Rodar apenas uma vez na configuração inicial ou após recriar o catálogo

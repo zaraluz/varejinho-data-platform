@@ -1,3 +1,4 @@
+# Databricks notebook source
 # pipeline/silver/quality_gate.py
 # Quality Gate da Silver — valida volumetria, schema, SCD2 e freshness
 # Falha com Exception se houver erros críticos

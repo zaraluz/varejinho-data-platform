@@ -1,3 +1,4 @@
+# Databricks notebook source
 # pipeline/gold/gold_fatos.py
 # Orquestrador dos fatos da Gold
 # Lê e executa cada SQL versionado no repo

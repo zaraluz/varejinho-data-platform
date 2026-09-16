@@ -1,3 +1,4 @@
+# Databricks notebook source
 # pipeline/gold/gold_dimensoes.py
 # Orquestrador das dimensões da Gold
 # Lê e executa cada SQL versionado no repo
