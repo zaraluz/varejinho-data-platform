@@ -1,0 +1,15 @@
+table: varejinho.silver.promocaoitem
+owner: zara.louise
+description: Itens das promoções — grão 1 linha por produto em promoção
+sla_freshness_hours: 24
+grain: [id]
+
+columns:
+  - {name: id,           type: bigint,        nullable: false, unique: true}
+  - {name: id_promocao,  type: bigint,        nullable: false}
+  - {name: id_produto,   type: int,           nullable: false}
+  - {name: precovenda,   type: decimal(14,3), nullable: true,  min: 0}
+
+quality_rules:
+  - {rule: no_duplicates, key: [id],                      severity: error}
+  - {rule: not_null,      columns: [id, id_promocao, id_produto], severity: error}
