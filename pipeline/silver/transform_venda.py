@@ -97,9 +97,6 @@ def validar_contrato(df, contract_path):
 # 1. Leitura da Bronze
 df = spark.table(BRONZE)
 
-# 2. Schema drift
-detectar_drift("venda", df, dbutils)
-
 # 3. Cast de tipos
 df_typed = (df
     .withColumn("valortotal",
@@ -130,6 +127,9 @@ df_typed = (df
     .withColumn("mes", F.month("data"))
     .withColumnRenamed("valortotal", "valor_total")
 )
+
+# 2. Schema drift
+detectar_drift("venda", df, dbutils)
 
 # 4. Contrato
 df_ok, df_quar, relatorio = validar_contrato(df_typed, CONTRACT)
