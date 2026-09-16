@@ -1,3 +1,4 @@
+# Databricks notebook source
 # pipeline/bronze/quality_gate.py
 # Quality Gate da Bronze — valida volumetria, completude e duplicatas brutas
 # Falha com Exception se houver alertas críticos — bloqueia pipeline no DAB
