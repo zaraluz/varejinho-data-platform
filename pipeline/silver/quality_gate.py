@@ -97,7 +97,7 @@ for tabela, cols in SCHEMA_CHECKS.items():
     except Exception as e:
         resultados.append(f"❌ {tabela} schema: {str(e)[:100]}")
 
-# ── Quarentena — monitora registros rejeitados ───────────────
+# ── Quarentena — valida somente o snapshot da execução atual ─
 QUARENTENAS = [
     "venda", "notaentrada", "notaentradaitem", "perda", "logestoque",
     "promocao", "promocaoitem", "pedido", "pedidoitem", "oferta",
@@ -112,9 +112,9 @@ for tabela in QUARENTENAS:
             count = spark.table(quar_table).count()
             check(f"{tabela} — quarentena",
                   count == 0,
-                  f"({count:,} registros rejeitados)")
-    except:
-        pass  # quarentena vazia é ok
+                  f"({count:,} registros rejeitados nesta execução)")
+    except Exception as e:
+        resultados.append(f"❌ {tabela} quarentena: {str(e)[:100]}")
 
 # ── Resultado ────────────────────────────────────────────────
 print("\n=== SILVER QUALITY GATE ===\n")
@@ -123,8 +123,11 @@ for r in resultados:
 
 total  = len(resultados)
 passou = sum(1 for r in resultados if r.startswith("✅"))
-falhou = total - passou
+falhas = [r for r in resultados if r.startswith("❌")]
+falhou = len(falhas)
 print(f"\n{passou}/{total} checks passaram | {falhou} falharam")
 
-if falhou > 0:
-    raise Exception(f"Silver Quality Gate falhou: {falhou}/{total} checks com erro")
+if falhas:
+    raise Exception(
+        "Silver Quality Gate falhou:\n" + "\n".join(falhas)
+    )
