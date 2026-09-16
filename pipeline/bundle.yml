@@ -54,6 +54,15 @@ resources:
             notebook_path: /Workspace/Users/zarallouise@gmail.com/varejinho-data-platform/pipeline/silver/silver_scd2.py
           description: "SCD2 dimensões + SCD1 domínios + curvaabc snapshot"
 
+        - task_key: silver_venda
+          environment_key: serverless
+          depends_on:
+            - task_key: bronze_quality_gate
+          notebook_task:
+            notebook_path: /Workspace/Users/zarallouise@gmail.com/varejinho-data-platform/pipeline/silver/transform_venda.py
+          description: "Processa silver.venda com cast, contrato e schema drift"
+
+
         - task_key: silver_fatos
           environment_key: serverless
           depends_on:
