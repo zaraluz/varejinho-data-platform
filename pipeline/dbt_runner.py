@@ -1,3 +1,4 @@
+# Databricks notebook source
 # pipeline/dbt_runner.py
 # Roda dbt test no Databricks via subprocess
 # Chamado pelo DAB após o pipeline diário
