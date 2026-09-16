@@ -12,6 +12,7 @@ from delta.tables import DeltaTable
 BRONZE     = "varejinho.bronze.venda"
 SILVER     = "varejinho.silver.venda"
 QUARENTENA = "varejinho.silver._quarantine_venda"
+HISTORICO  = "varejinho.silver._quarantine_history_venda"
 CONTRACT   = "/Workspace/Users/zarallouise@gmail.com/varejinho-data-platform/contracts/silver/venda.yaml"
 REGISTRY   = "s3://varejinho-lake/_control/schema_registry"
 
@@ -156,11 +157,22 @@ else:
         .saveAsTable(SILVER))
 
 # 7. Quarentena
+# Snapshot atual para o Quality Gate + histórico separado para auditoria
+if spark.catalog.tableExists(QUARENTENA):
+    spark.sql(f"TRUNCATE TABLE {QUARENTENA}")
+
 if relatorio["quarentena"] > 0:
     (df_quar.write.format("delta")
         .mode("append")
         .saveAsTable(QUARENTENA))
-    print(f"[venda] {relatorio['quarentena']} registros em quarentena.")
+
+    (df_quar
+        .withColumn("_quarantined_at", F.current_timestamp())
+        .write.format("delta")
+        .mode("append")
+        .saveAsTable(HISTORICO))
+
+    print(f"[venda] {relatorio['quarentena']} registros em quarentena nesta execução.")
 
 count = spark.table(SILVER).count()
 print(f"✅ venda: {count:,} linhas na Silver")

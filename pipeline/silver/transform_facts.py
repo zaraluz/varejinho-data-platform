@@ -172,6 +172,7 @@ def transformar(tabela: str, spark, dbutils, ultima_particao: str = None):
     BRONZE     = f"varejinho.bronze.{tabela}"
     SILVER     = f"varejinho.silver.{tabela}"
     QUARENTENA = f"varejinho.silver._quarantine_{tabela}"
+    HISTORICO  = f"varejinho.silver._quarantine_history_{tabela}"
     CONTRACT   = f"{REPO}/contracts/silver/{tabela}.yaml"
 
     # 1. Leitura incremental
@@ -239,11 +240,23 @@ def transformar(tabela: str, spark, dbutils, ultima_particao: str = None):
         writer.saveAsTable(SILVER)
 
     # 9. Quarentena
+    # _quarantine_<tabela> = snapshot da execução atual (usado pelo Quality Gate)
+    # _quarantine_history_<tabela> = histórico append-only para auditoria
+    if spark.catalog.tableExists(QUARENTENA):
+        spark.sql(f"TRUNCATE TABLE {QUARENTENA}")
+
     if relatorio.get("quarentena", 0) > 0:
         (df_quar.write.format("delta")
             .mode("append")
             .saveAsTable(QUARENTENA))
-        print(f"[{tabela}] {relatorio['quarentena']} registros em quarentena.")
+
+        (df_quar
+            .withColumn("_quarantined_at", F.current_timestamp())
+            .write.format("delta")
+            .mode("append")
+            .saveAsTable(HISTORICO))
+
+        print(f"[{tabela}] {relatorio['quarentena']} registros em quarentena nesta execução.")
 
     count = spark.table(SILVER).count()
     print(f"✅ {tabela}: {count:,} linhas na Silver")
