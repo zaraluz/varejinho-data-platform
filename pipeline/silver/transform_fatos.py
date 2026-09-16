@@ -58,6 +58,7 @@ CONFIG = {
         "chave":    ["id"],
         "data":     "datainicio",
         "decimais": ["precooferta", "preconormal", "precoimediato"],
+        "try_decimais": ["precoimediato"],
     },
     "pagarfornecedor": {
         "chave":    ["id"],
@@ -186,6 +187,12 @@ def transformar(tabela: str, spark, dbutils, ultima_particao: str = None):
         if col in df.columns:
             df = df.withColumn(col,
                 F.regexp_replace(F.col(col), ",", ".").cast("decimal(14,3)"))
+
+    # 2b. Cast tolerante — colunas com valores não numéricos (ex: 'N')
+    for col in cfg.get("try_decimais", []):
+        if col in df.columns:
+            df = df.withColumn(col,
+                F.expr(f"try_cast(replace(`{col}`, ',', '.') as decimal(14,3))"))
 
     # 3. Cast de timestamp principal e derivação de ano/mes
     if cfg["data"] and cfg["data"] in df.columns:
