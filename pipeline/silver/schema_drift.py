@@ -1,3 +1,4 @@
+# Databricks notebook source
 # databricks/silver/schema_drift.py
 import json
 from datetime import datetime
