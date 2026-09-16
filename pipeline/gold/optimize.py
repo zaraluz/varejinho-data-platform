@@ -1,3 +1,4 @@
+# Databricks notebook source
 # pipeline/gold/optimize_vacuum.py
 # OPTIMIZE + ZORDER + VACUUM em todas as tabelas da Gold
 # Rodar após qualquer recriação de tabela ou semanalmente via DAB
