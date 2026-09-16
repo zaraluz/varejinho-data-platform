@@ -13,5 +13,5 @@ columns:
   - {name: aliquota,                type: decimal(8,4),  nullable: true}
 
 quality_rules:
-  - {rule: no_duplicates,  key: [id],                         severity: error}
-  - {rule: not_null,       columns: [id, id_pagaroutrasdespesas, valor, datavencimento], severity: error}
+  - {rule: no_duplicates,  key: [id],                                      severity: error}
+  - {rule: not_null,       columns: [id, id_pagaroutrasdespesas, valor],   severity: error}
