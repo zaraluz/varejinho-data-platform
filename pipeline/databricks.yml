@@ -142,6 +142,55 @@ resources:
             notebook_path: ${workspace.file_path}/pipeline/silver/commit_scd2_product_watermark.py
           description: "Promove candidate_snapshot para last_processed_snapshot somente após o Quality Gate passar"
 
+    scd2_product_replay:
+      name: "[${bundle.target}] Varejinho — Gate B6 Product SCD2 Replay"
+      max_concurrent_runs: 1
+      parameters:
+        - name: catalog
+          default: ${var.catalog}
+      tasks:
+        - task_key: prepare_replay_sandbox
+          notebook_task:
+            notebook_path: ${workspace.file_path}/pipeline/silver/prepare_scd2_product_replay.py
+          description: "Cria cópias sandbox da Silver e controle com watermark recuado um snapshot; não toca no estado real"
+
+        - task_key: replay_incremental_engine
+          depends_on:
+            - task_key: prepare_replay_sandbox
+          notebook_task:
+            notebook_path: ${workspace.file_path}/pipeline/silver/incremental_scd2_product.py
+            base_parameters:
+              silver_table: ${var.catalog}.silver._b6_produto_replay
+              control_table: ${var.catalog}.control._b6_scd2_watermark
+              entity: produto
+          description: "Executa o MESMO engine incremental B5 sobre o sandbox e reprocessa o último snapshot"
+
+        - task_key: validate_replay_scd2
+          depends_on:
+            - task_key: replay_incremental_engine
+          notebook_task:
+            notebook_path: ${workspace.file_path}/pipeline/silver/validate_scd2_product.py
+            base_parameters:
+              silver_table: ${var.catalog}.silver._b6_produto_replay
+          description: "Roda os 21 invariantes SCD2 sobre a cópia após o replay"
+
+        - task_key: commit_replay_watermark
+          depends_on:
+            - task_key: validate_replay_scd2
+          notebook_task:
+            notebook_path: ${workspace.file_path}/pipeline/silver/commit_scd2_product_watermark.py
+            base_parameters:
+              control_table: ${var.catalog}.control._b6_scd2_watermark
+              entity: produto
+          description: "Promove o watermark somente no controle sandbox"
+
+        - task_key: verify_replay_idempotency
+          depends_on:
+            - task_key: commit_replay_watermark
+          notebook_task:
+            notebook_path: ${workspace.file_path}/pipeline/silver/verify_scd2_product_replay.py
+          description: "Compara antes/depois com exceptAll, prova igualdade exata e confirma que Silver/watermark reais não foram tocados"
+
     pipeline_diario:
       name: "[${bundle.target}] Varejinho — Pipeline Diário"
       # Dev fica PAUSED por padrão. Somente prod é liberado no override acima.
