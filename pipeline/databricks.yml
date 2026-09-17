@@ -47,6 +47,18 @@ targets:
 resources:
   jobs:
 
+    bootstrap_environment:
+      name: "[${bundle.target}] Varejinho — Bootstrap Ambiente"
+      max_concurrent_runs: 1
+      parameters:
+        - name: catalog
+          default: ${var.catalog}
+      tasks:
+        - task_key: register_bronze
+          notebook_task:
+            notebook_path: ${workspace.file_path}/pipeline/bronze/ingest_bronze.py
+          description: "Cria catálogo/schemas e registra Bronze external no S3"
+
     pipeline_diario:
       name: "[${bundle.target}] Varejinho — Pipeline Diário"
       # Dev fica PAUSED por padrão. Somente prod é liberado no override acima.
