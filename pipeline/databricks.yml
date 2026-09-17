@@ -6,6 +6,9 @@ variables:
   catalog:
     description: "Unity Catalog usado pelo target"
     default: varejinho
+  bronze_source_catalog:
+    description: "Catálogo que expõe a Bronze raw compartilhada"
+    default: varejinho
   control_root:
     description: "Raiz dos artefatos de controle do ambiente"
     default: s3://varejinho-lake/_control
@@ -25,12 +28,14 @@ targets:
     default: true
     variables:
       catalog: varejinho_dev
+      bronze_source_catalog: varejinho
       control_root: s3://varejinho-lake/_control/dev
 
   prod:
     mode: production
     variables:
       catalog: varejinho
+      bronze_source_catalog: varejinho
       control_root: s3://varejinho-lake/_control
     resources:
       jobs:
@@ -53,11 +58,13 @@ resources:
       parameters:
         - name: catalog
           default: ${var.catalog}
+        - name: bronze_source_catalog
+          default: ${var.bronze_source_catalog}
       tasks:
         - task_key: register_bronze
           notebook_task:
             notebook_path: ${workspace.file_path}/pipeline/bronze/ingest_bronze.py
-          description: "Cria catálogo/schemas e registra Bronze external no S3"
+          description: "Cria catálogo/schemas; prod registra Bronze external, dev cria views read-only sobre a Bronze raw"
 
     pipeline_diario:
       name: "[${bundle.target}] Varejinho — Pipeline Diário"
