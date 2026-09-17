@@ -30,9 +30,10 @@ TABELAS = [
     "tipopromocao", "venda",
 ]
 
-# Catálogo de destino: Silver/Gold serão fisicamente isoladas por catálogo.
+# Catálogo de destino: Bronze é compartilhada via views em dev; Silver, Gold e
+# Control são isolados por catálogo. Control guarda estado operacional, não dado de negócio.
 spark.sql(f"CREATE CATALOG IF NOT EXISTS {CATALOG}")
-for schema in ["bronze", "silver", "gold"]:
+for schema in ["bronze", "silver", "gold", "control"]:
     spark.sql(f"CREATE SCHEMA IF NOT EXISTS {CATALOG}.{schema}")
 
 sucesso = []
