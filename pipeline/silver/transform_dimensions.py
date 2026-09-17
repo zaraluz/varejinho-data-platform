@@ -2,6 +2,17 @@
 from pyspark.sql import functions as F
 from delta.tables import DeltaTable
 
+
+def job_param(nome: str, default: str) -> str:
+    """Lê parâmetro do Job; mantém fallback para execução manual do notebook."""
+    try:
+        return dbutils.widgets.get(nome)
+    except Exception:
+        return default
+
+
+CATALOG = job_param("catalog", "varejinho")
+
 SCD2_CONFIG = {
     "produto":       {
         "cols": ["descricaocompleta","descricaoreduzida","mercadologico1","mercadologico2","mercadologico3","ncm1"],
@@ -30,8 +41,8 @@ resultados = []
 # SCD2
 for tabela, cfg in SCD2_CONFIG.items():
     try:
-        BRONZE = f"varejinho.bronze.{tabela}"
-        SILVER = f"varejinho.silver.{tabela}"
+        BRONZE = f"{CATALOG}.bronze.{tabela}"
+        SILVER = f"{CATALOG}.silver.{tabela}"
 
         ultima = spark.table(BRONZE).agg(F.max("ingestion_date")).collect()[0][0]
         df_bronze = spark.table(BRONZE).where(F.col("ingestion_date") == ultima)
@@ -51,7 +62,8 @@ for tabela, cfg in SCD2_CONFIG.items():
             .withColumn("valid_to",   F.lit(None).cast("timestamp"))
             .withColumn("is_current", F.lit(True)))
 
-        # Drop e recria — fix de valid_from exige reprocessamento completo
+        # Implementação SCD2 será substituída no próximo gate.
+        # Por enquanto a mudança deste commit é apenas isolamento dev/prod.
         spark.sql(f"DROP TABLE IF EXISTS {SILVER}")
         df_novo.write.format("delta").saveAsTable(SILVER)
         count = spark.table(SILVER).count()
@@ -63,8 +75,8 @@ for tabela, cfg in SCD2_CONFIG.items():
 # SCD1
 for tabela in SCD1_TABELAS:
     try:
-        BRONZE = f"varejinho.bronze.{tabela}"
-        SILVER = f"varejinho.silver.{tabela}"
+        BRONZE = f"{CATALOG}.bronze.{tabela}"
+        SILVER = f"{CATALOG}.silver.{tabela}"
         ultima = spark.table(BRONZE).agg(F.max("ingestion_date")).collect()[0][0]
         df = spark.table(BRONZE).where(F.col("ingestion_date") == ultima)
         (df.write.format("delta").mode("overwrite")
@@ -76,8 +88,8 @@ for tabela in SCD1_TABELAS:
 
 # CURVAABC — fato snapshot
 try:
-    BRONZE = "varejinho.bronze.curvaabc"
-    SILVER = "varejinho.silver.curvaabc"
+    BRONZE = f"{CATALOG}.bronze.curvaabc"
+    SILVER = f"{CATALOG}.silver.curvaabc"
 
     df = spark.table(BRONZE)
     df_typed = (df
