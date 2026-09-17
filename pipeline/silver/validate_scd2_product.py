@@ -1,6 +1,7 @@
 # Databricks notebook source
 # pipeline/silver/validate_scd2_product.py
 # Gate B4 — invariantes do SCD2 de produto reconstruído no ambiente dev.
+# Pode validar a Silver real ou uma tabela sandbox parametrizada pelo Gate B6.
 
 from pyspark.sql import functions as F
 from pyspark.sql.window import Window
@@ -14,8 +15,8 @@ def job_param(nome: str, default: str) -> str:
 
 
 CATALOG = job_param("catalog", "varejinho_dev")
-BRONZE = f"{CATALOG}.bronze.produto"
-SILVER = f"{CATALOG}.silver.produto"
+BRONZE = job_param("bronze_table", f"{CATALOG}.bronze.produto")
+SILVER = job_param("silver_table", f"{CATALOG}.silver.produto")
 KEY = "id"
 SNAPSHOT = "ingestion_date"
 
