@@ -85,6 +85,18 @@ resources:
             notebook_path: ${workspace.file_path}/pipeline/silver/profile_scd2.py
           description: "Diagnóstico read-only dos snapshots Bronze antes de reconstruir SCD2"
 
+    scd2_change_profile:
+      name: "[${bundle.target}] Varejinho — Gate B2 Change Attribution"
+      max_concurrent_runs: 1
+      parameters:
+        - name: catalog
+          default: ${var.catalog}
+      tasks:
+        - task_key: profile_product_changes
+          notebook_task:
+            notebook_path: ${workspace.file_path}/pipeline/silver/profile_scd2_changes.py
+          description: "Atribui as mudanças observadas de produto aos atributos e compara dataalteracao x ingestion_date"
+
     pipeline_diario:
       name: "[${bundle.target}] Varejinho — Pipeline Diário"
       # Dev fica PAUSED por padrão. Somente prod é liberado no override acima.
