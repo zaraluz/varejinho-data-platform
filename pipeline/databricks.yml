@@ -73,6 +73,18 @@ resources:
             notebook_path: ${workspace.file_path}/pipeline/bootstrap/validate_environment.py
           description: "Prova que Bronze dev referencia o raw e que escritas Silver permanecem isoladas"
 
+    scd2_profile:
+      name: "[${bundle.target}] Varejinho — Gate B SCD2 Profiling"
+      max_concurrent_runs: 1
+      parameters:
+        - name: catalog
+          default: ${var.catalog}
+      tasks:
+        - task_key: profile_scd2_sources
+          notebook_task:
+            notebook_path: ${workspace.file_path}/pipeline/silver/profile_scd2.py
+          description: "Diagnóstico read-only dos snapshots Bronze antes de reconstruir SCD2"
+
     pipeline_diario:
       name: "[${bundle.target}] Varejinho — Pipeline Diário"
       # Dev fica PAUSED por padrão. Somente prod é liberado no override acima.
