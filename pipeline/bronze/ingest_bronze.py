@@ -1,16 +1,18 @@
 # Databricks notebook source
-# pipeline/bronze/registro_bronze.py
-# Registra as 37 tabelas da Bronze como external tables no Unity Catalog
-# Rodar apenas uma vez na configuração inicial ou após recriar o catálogo
-#
-# Pré-requisitos:
-# - Catálogo varejinho criado com schemas bronze, silver e gold
-# - External Location varejinho_lake_new apontando para s3://varejinho-lake/
-# - Arquivos CSV presentes em s3://varejinho-lake/bronze/<tabela>/ingestion_date=<data>/
-#
-# Observação:
-# Pentaho Community Edition não tem Parquet Output nativo — Bronze é CSV.
-# Conversão para Delta acontece na Silver.
+# pipeline/bronze/ingest_bronze.py
+# Cria catálogo/schemas do ambiente e registra as 37 tabelas Bronze como external tables.
+# Bronze é compartilhada fisicamente no S3; Silver/Gold ficam isoladas por catálogo.
+
+
+def job_param(nome: str, default: str) -> str:
+    try:
+        return dbutils.widgets.get(nome)
+    except Exception:
+        return default
+
+
+CATALOG = job_param("catalog", "varejinho")
+BASE_PATH = "s3://varejinho-lake/bronze"
 
 TABELAS = [
     "curvaabc", "fornecedor", "logestoque", "loja", "mercadologico",
@@ -25,14 +27,18 @@ TABELAS = [
     "tipopromocao", "venda",
 ]
 
-BASE_PATH = "s3://varejinho-lake/bronze"
+# Bootstrap idempotente do ambiente.
+spark.sql(f"CREATE CATALOG IF NOT EXISTS {CATALOG}")
+for schema in ["bronze", "silver", "gold"]:
+    spark.sql(f"CREATE SCHEMA IF NOT EXISTS {CATALOG}.{schema}")
+
 sucesso = []
 falha = []
 
 for tabela in TABELAS:
     try:
         spark.sql(f"""
-            CREATE TABLE IF NOT EXISTS varejinho.bronze.{tabela}
+            CREATE TABLE IF NOT EXISTS {CATALOG}.bronze.{tabela}
             USING CSV
             OPTIONS (
                 header = 'true',
@@ -44,12 +50,17 @@ for tabela in TABELAS:
             )
             LOCATION '{BASE_PATH}/{tabela}/'
         """)
-        count = spark.table(f"varejinho.bronze.{tabela}").count()
+        count = spark.table(f"{CATALOG}.bronze.{tabela}").count()
         sucesso.append(f"✅ {tabela}: {count:,} linhas")
 
     except Exception as e:
-        falha.append(f"❌ {tabela}: {str(e)[:100]}")
+        falha.append(f"❌ {tabela}: {str(e)[:160]}")
 
-print(f"\n=== RESULTADO: {len(sucesso)} sucesso, {len(falha)} falha ===\n")
-for s in sucesso: print(s)
-for f in falha: print(f)
+print(f"\n=== BOOTSTRAP {CATALOG}: {len(sucesso)} sucesso, {len(falha)} falha ===\n")
+for s in sucesso:
+    print(s)
+for f in falha:
+    print(f)
+
+if falha:
+    raise Exception(f"Bootstrap de {CATALOG} falhou em {len(falha)} tabelas")
