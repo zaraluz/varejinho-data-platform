@@ -1,6 +1,7 @@
 # Databricks notebook source
 # pipeline/silver/commit_scd2_product_watermark.py
 # Gate B5 — promove candidate watermark para committed SOMENTE após o Quality Gate.
+# Pode operar no controle real ou em uma tabela sandbox parametrizada pelo Gate B6.
 
 from pyspark.sql import functions as F
 
@@ -13,9 +14,9 @@ def job_param(nome: str, default: str) -> str:
 
 
 CATALOG = job_param("catalog", "varejinho_dev")
-CONTROL_TABLE = f"{CATALOG}.control.scd2_watermark"
-BRONZE = f"{CATALOG}.bronze.produto"
-ENTITY = "produto"
+CONTROL_TABLE = job_param("control_table", f"{CATALOG}.control.scd2_watermark")
+BRONZE = job_param("bronze_table", f"{CATALOG}.bronze.produto")
+ENTITY = job_param("entity", "produto")
 
 if not CATALOG.endswith("_dev"):
     raise Exception(
@@ -37,6 +38,7 @@ latest_bronze = spark.table(BRONZE).agg(F.max("ingestion_date")).collect()[0][0]
 
 print("\n=== GATE B5 — COMMIT WATERMARK ===")
 print(f"entity:     {ENTITY}")
+print(f"control:    {CONTROL_TABLE}")
 print(f"committed:  {committed}")
 print(f"candidate:  {candidate}")
 print(f"status:     {status}")
@@ -49,7 +51,7 @@ elif status != "PENDING_VALIDATION" or candidate is None:
         f"Estado de controle inválido para commit: status={status}, candidate={candidate}"
     )
 else:
-    if candidate < committed:
+    if committed is not None and candidate < committed:
         raise Exception(f"Candidate {candidate} é anterior ao committed {committed}")
     if candidate > latest_bronze:
         raise Exception(f"Candidate {candidate} está à frente do último snapshot Bronze {latest_bronze}")
