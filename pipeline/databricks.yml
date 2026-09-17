@@ -116,6 +116,32 @@ resources:
             notebook_path: ${workspace.file_path}/pipeline/silver/validate_scd2_product.py
           description: "Valida cardinalidade, corrente única, intervalos, hash, Type 1 e estado current"
 
+    scd2_product_incremental:
+      name: "[${bundle.target}] Varejinho — Gate B5 Product SCD2 Incremental"
+      max_concurrent_runs: 1
+      parameters:
+        - name: catalog
+          default: ${var.catalog}
+      tasks:
+        - task_key: apply_incremental_product_scd2
+          notebook_task:
+            notebook_path: ${workspace.file_path}/pipeline/silver/incremental_scd2_product.py
+          description: "Processa somente snapshots Bronze posteriores ao watermark committed; Type 2 fecha/insere, Type 1 atualiza sem versionar"
+
+        - task_key: validate_incremental_product_scd2
+          depends_on:
+            - task_key: apply_incremental_product_scd2
+          notebook_task:
+            notebook_path: ${workspace.file_path}/pipeline/silver/validate_scd2_product.py
+          description: "Revalida todos os invariantes SCD2 antes de promover o watermark"
+
+        - task_key: commit_product_watermark
+          depends_on:
+            - task_key: validate_incremental_product_scd2
+          notebook_task:
+            notebook_path: ${workspace.file_path}/pipeline/silver/commit_scd2_product_watermark.py
+          description: "Promove candidate_snapshot para last_processed_snapshot somente após o Quality Gate passar"
+
     pipeline_diario:
       name: "[${bundle.target}] Varejinho — Pipeline Diário"
       # Dev fica PAUSED por padrão. Somente prod é liberado no override acima.
