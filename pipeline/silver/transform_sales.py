@@ -1,22 +1,37 @@
 # Databricks notebook source
-# pipeline/silver/transform_venda.py
-# Processa varejinho.bronze.venda → varejinho.silver.venda
+# pipeline/silver/transform_sales.py
+# Processa Bronze venda → Silver venda
 # Cast de tipos, validação de contrato, quarentena e MERGE idempotente
 
 import json
-import sys
 from pyspark.sql import functions as F
 from pyspark.sql.window import Window
 from delta.tables import DeltaTable
 
-BRONZE     = "varejinho.bronze.venda"
-SILVER     = "varejinho.silver.venda"
-QUARENTENA = "varejinho.silver._quarantine_venda"
-HISTORICO  = "varejinho.silver._quarantine_history_venda"
-CONTRACT   = "/Workspace/Users/<USER>/varejinho-data-platform/contracts/silver/venda.yaml"
-REGISTRY   = "s3://varejinho-lake/_control/schema_registry"
 
-# ── Schema drift (inline) ────────────────────────────────────────────────────
+def job_param(nome: str, default: str) -> str:
+    """Lê parâmetro do Job; mantém fallback para execução manual do notebook."""
+    try:
+        return dbutils.widgets.get(nome)
+    except Exception:
+        return default
+
+
+CATALOG = job_param("catalog", "varejinho")
+BUNDLE_FILES_PATH = job_param(
+    "bundle_files_path",
+    "/Workspace/Users/<USER>/varejinho-data-platform",
+)
+CONTROL_ROOT = job_param("control_root", "s3://varejinho-lake/_control")
+
+BRONZE     = f"{CATALOG}.bronze.venda"
+SILVER     = f"{CATALOG}.silver.venda"
+QUARENTENA = f"{CATALOG}.silver._quarantine_venda"
+HISTORICO  = f"{CATALOG}.silver._quarantine_history_venda"
+CONTRACT   = f"{BUNDLE_FILES_PATH}/contracts/silver/venda.yaml"
+REGISTRY   = f"{CONTROL_ROOT}/schema_registry"
+
+
 def detectar_drift(tabela, df, dbutils):
     schema_atual = {f.name: f.dataType.simpleString() for f in df.schema.fields}
     registry_file = f"{REGISTRY}/{tabela}.json"
@@ -25,7 +40,7 @@ def detectar_drift(tabela, df, dbutils):
         schema_anterior = json.loads(conteudo)
     except Exception:
         dbutils.fs.put(registry_file, json.dumps(schema_atual), overwrite=True)
-        print(f"[{tabela}] Schema baseline criado.")
+        print(f"[{tabela}] Schema baseline criado em {REGISTRY}.")
         return
 
     novas     = sorted(set(schema_atual) - set(schema_anterior))
@@ -41,7 +56,7 @@ def detectar_drift(tabela, df, dbutils):
 
     dbutils.fs.put(registry_file, json.dumps(schema_atual), overwrite=True)
 
-# ── Contract validator (inline) ──────────────────────────────────────────────
+
 def validar_contrato(df, contract_path):
     import yaml
     with open(contract_path, "r") as f:
@@ -94,12 +109,11 @@ def validar_contrato(df, contract_path):
     }
     return df_ok, df_quar, relatorio
 
-# ── Pipeline ─────────────────────────────────────────────────────────────────
 
-# 1. Leitura da Bronze
+# 1. Leitura da Bronze — incrementalidade será ligada ao watermark em gate próprio
 df = spark.table(BRONZE)
 
-# 3. Cast de tipos
+# 2. Cast de tipos
 df_typed = (df
     .withColumn("valortotal",
         F.regexp_replace(F.col("valortotal"), ",", ".").cast("decimal(14,2)"))
@@ -130,8 +144,8 @@ df_typed = (df
     .withColumnRenamed("valortotal", "valor_total")
 )
 
-# 2. Schema drift
-detectar_drift("venda", df, dbutils)
+# 3. Schema drift
+detectar_drift("venda", df_typed, dbutils)
 
 # 4. Contrato
 df_ok, df_quar, relatorio = validar_contrato(df_typed, CONTRACT)
@@ -156,8 +170,7 @@ else:
         .partitionBy("ano", "mes")
         .saveAsTable(SILVER))
 
-# 7. Quarentena
-# Snapshot atual para o Quality Gate + histórico separado para auditoria
+# 7. Quarentena — snapshot atual + histórico append-only
 if spark.catalog.tableExists(QUARENTENA):
     spark.sql(f"TRUNCATE TABLE {QUARENTENA}")
 
@@ -175,4 +188,4 @@ if relatorio["quarentena"] > 0:
     print(f"[venda] {relatorio['quarentena']} registros em quarentena nesta execução.")
 
 count = spark.table(SILVER).count()
-print(f"✅ venda: {count:,} linhas na Silver")
+print(f"✅ {SILVER}: {count:,} linhas")
