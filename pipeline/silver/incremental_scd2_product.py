@@ -8,7 +8,8 @@
 # - Type 2 fecha a versão anterior e insere nova versão;
 # - Type 1 atualiza todas as versões sem criar nova versão;
 # - ausência no snapshot NÃO é tratada como deleção;
-# - o watermark committed só é avançado em task posterior, depois do Quality Gate.
+# - o watermark committed só é avançado em task posterior, depois do Quality Gate;
+# - silver/control podem ser parametrizados para testes B6 sem tocar no estado real de dev.
 
 from delta.tables import DeltaTable
 from pyspark.sql import functions as F
@@ -23,11 +24,11 @@ def job_param(nome: str, default: str) -> str:
 
 
 CATALOG = job_param("catalog", "varejinho_dev")
-BRONZE = f"{CATALOG}.bronze.produto"
-SILVER = f"{CATALOG}.silver.produto"
-CONTROL_SCHEMA = f"{CATALOG}.control"
-CONTROL_TABLE = f"{CONTROL_SCHEMA}.scd2_watermark"
-ENTITY = "produto"
+BRONZE = job_param("bronze_table", f"{CATALOG}.bronze.produto")
+SILVER = job_param("silver_table", f"{CATALOG}.silver.produto")
+CONTROL_TABLE = job_param("control_table", f"{CATALOG}.control.scd2_watermark")
+CONTROL_SCHEMA = ".".join(CONTROL_TABLE.split(".")[:2])
+ENTITY = job_param("entity", "produto")
 KEY = "id"
 SNAPSHOT = "ingestion_date"
 
@@ -382,19 +383,41 @@ def process_snapshot(snapshot_date, previous_date, silver_columns):
     joined = c.join(p, F.col(f"c.{KEY}") == F.col(f"p.{KEY}"), "left")
 
     current_cols = [F.col(f"c.{col}").alias(col) for col in current.columns]
-
     new_ids = joined.filter(F.col(f"p.{KEY}").isNull()).select(*current_cols)
 
-    # Reaparecimento após ausência não recebe semântica inventada. A política atual
-    # não fecha versões por ausência; portanto, esse caso precisa de modeling explícito.
-    reappeared = new_ids.select(KEY).join(
-        spark.table(SILVER).select(KEY).distinct(), on=KEY, how="inner"
+    # Um id ausente no snapshot anterior pode significar duas coisas:
+    # 1) replay de um snapshot já aplicado: a Silver já possui scd_source_snapshot >= snapshot atual;
+    # 2) reaparecimento real após gap: a Silver conhece o id, mas só por snapshots anteriores.
+    # O primeiro caso é no-op idempotente; o segundo continua bloqueado até definirmos semântica.
+    existing_seen = (
+        spark.table(SILVER)
+             .groupBy(KEY)
+             .agg(F.max("scd_source_snapshot").alias("_max_scd_source_snapshot"))
+             .withColumn("_already_in_silver", F.lit(True))
+    )
+    classified_new = new_ids.join(existing_seen, on=KEY, how="left")
+
+    already_applied_new = classified_new.filter(
+        F.col("_already_in_silver").isNotNull()
+        & F.col("_max_scd_source_snapshot").isNotNull()
+        & (F.col("_max_scd_source_snapshot") >= F.lit(snapshot_date))
     ).count()
-    if reappeared:
+
+    true_reappeared = classified_new.filter(
+        F.col("_already_in_silver").isNotNull()
+        & (
+            F.col("_max_scd_source_snapshot").isNull()
+            | (F.col("_max_scd_source_snapshot") < F.lit(snapshot_date))
+        )
+    ).count()
+
+    if true_reappeared:
         raise Exception(
-            f"Snapshot {snapshot_date}: {reappeared:,} id(s) reapareceram após ausência. "
+            f"Snapshot {snapshot_date}: {true_reappeared:,} id(s) reapareceram após ausência. "
             "Política de reativação ainda não definida; processamento bloqueado."
         )
+
+    new_ids = classified_new.drop("_max_scd_source_snapshot", "_already_in_silver")
 
     type2_changes = joined.filter(
         F.col(f"p.{KEY}").isNotNull()
@@ -413,16 +436,19 @@ def process_snapshot(snapshot_date, previous_date, silver_columns):
     type1_count = type1_changes.select(KEY).distinct().count()
 
     print(f"\n--- Snapshot {snapshot_date} | anterior={previous_date} ---")
-    print(f"novos ids:                {new_count:,}")
-    print(f"mudanças Type 2:          {type2_count:,}")
-    print(f"ids com mudança Type 1:   {type1_count:,}")
-    print(f"ids ausentes no snapshot: {disappeared:,} (nenhuma ação por política)")
+    print(f"novos ids no delta Bronze:      {new_count:,}")
+    print(f"novos ids já aplicados/replay:  {already_applied_new:,}")
+    print(f"mudanças Type 2:                {type2_count:,}")
+    print(f"ids com mudança Type 1:         {type1_count:,}")
+    print(f"ids ausentes no snapshot:       {disappeared:,} (nenhuma ação por política)")
 
-    # Primeira versão de IDs realmente novos.
+    # Primeira versão de IDs realmente novos. Em replay, MERGE encontra a mesma
+    # grain (id, valid_from) e não reinsere a linha.
     new_resolved = resolve_valid_from(new_ids, "datacadastro", first_version=True)
     new_inserted = insert_versions(new_resolved, silver_columns)
 
     # Mudanças Type 2: fecha a versão imediatamente anterior e insere a nova.
+    # Em replay, os mesmos valores são reaplicados e o MERGE da nova grain vira no-op.
     changed_resolved = resolve_valid_from(type2_changes, "dataalteracao", first_version=False)
     closed = close_previous_versions(changed_resolved)
     changed_inserted = insert_versions(changed_resolved, silver_columns)
@@ -431,13 +457,14 @@ def process_snapshot(snapshot_date, previous_date, silver_columns):
     # versão Type 2 criada no mesmo snapshot, recebam o último valor conhecido.
     type1_updated_ids = apply_type1(type1_changes)
 
-    print(f"versões anteriores fechadas: {closed:,}")
-    print(f"primeiras versões inseridas:  {new_inserted:,}")
-    print(f"novas versões Type 2:         {changed_inserted:,}")
-    print(f"ids atualizados como Type 1:  {type1_updated_ids:,}")
+    print(f"versões anteriores fechadas:    {closed:,}")
+    print(f"primeiras versões inseridas:    {new_inserted:,}")
+    print(f"novas versões Type 2:           {changed_inserted:,}")
+    print(f"ids atualizados como Type 1:    {type1_updated_ids:,}")
 
     return {
         "new_ids": new_count,
+        "already_applied_new": already_applied_new,
         "type2_changes": type2_count,
         "type1_changes": type1_count,
         "disappeared": disappeared,
@@ -501,6 +528,7 @@ else:
 
     totals = {
         "new_ids": 0,
+        "already_applied_new": 0,
         "type2_changes": 0,
         "type1_changes": 0,
         "disappeared": 0,
@@ -529,6 +557,7 @@ else:
     print("\n=== B5 APPLY CONCLUÍDO ===")
     print(f"snapshots processados:          {len(new_snapshots)}")
     print(f"novos ids observados:           {totals['new_ids']:,}")
+    print(f"novos ids já aplicados/replay:  {totals['already_applied_new']:,}")
     print(f"mudanças Type 2 observadas:     {totals['type2_changes']:,}")
     print(f"ids com mudança Type 1:         {totals['type1_changes']:,}")
     print(f"ausências observadas:           {totals['disappeared']:,} (sem fechamento automático)")
