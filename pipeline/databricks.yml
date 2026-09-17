@@ -66,6 +66,13 @@ resources:
             notebook_path: ${workspace.file_path}/pipeline/bronze/ingest_bronze.py
           description: "Cria catálogo/schemas; prod registra Bronze external, dev cria views read-only sobre a Bronze raw"
 
+        - task_key: validate_isolation
+          depends_on:
+            - task_key: register_bronze
+          notebook_task:
+            notebook_path: ${workspace.file_path}/pipeline/bootstrap/validate_environment.py
+          description: "Prova que Bronze dev referencia o raw e que escritas Silver permanecem isoladas"
+
     pipeline_diario:
       name: "[${bundle.target}] Varejinho — Pipeline Diário"
       # Dev fica PAUSED por padrão. Somente prod é liberado no override acima.
