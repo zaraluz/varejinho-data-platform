@@ -170,7 +170,7 @@ for c in candidate_cols:
     candidate_change_stats.append((c, n_events, n_ids, c in CURRENT_TYPE2_CANDIDATES))
 
 for c, n_events, n_ids, in_hash in sorted(candidate_change_stats, key=lambda x: (-x[1], x[0])):
-    role = "NO HASH" if in_hash else "FORA DO HASH"
+    role = "DENTRO DO HASH" if in_hash else "FORA DO HASH"
     print(f"  {c:<24} eventos={n_events:>4} | ids={n_ids:>4} | {role}")
 
 outside_hash = [c for c in candidate_cols if c not in CURRENT_TYPE2_CANDIDATES]
@@ -190,8 +190,6 @@ print("\n--- C. DATAALTERACAO x INGESTION_DATE ---")
 if "dataalteracao" not in cols:
     print("⚠️ dataalteracao não existe na Bronze de produto; não é possível comparar timestamps.")
 else:
-    # Mesmo formato usado no pipeline atual para datas do cadastro. O cast final
-    # cobre valores já tipados ou formatos aceitos nativamente pelo Spark.
     parsed = F.coalesce(
         F.to_timestamp(F.col("dataalteracao"), "yyyy/MM/dd HH:mm:ss.SSSSSSSSS"),
         F.col("dataalteracao").cast("timestamp"),
