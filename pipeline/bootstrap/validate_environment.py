@@ -1,7 +1,7 @@
 # Databricks notebook source
 # Valida o isolamento lógico do ambiente antes de liberar transformações destrutivas.
 # Em dev, a Bronze deve ser composta por views sobre a Bronze raw de prod,
-# enquanto Silver/Gold pertencem exclusivamente ao catálogo dev.
+# enquanto Silver/Gold/Control pertencem exclusivamente ao catálogo dev.
 
 from pyspark.sql import functions as F
 
@@ -26,7 +26,7 @@ def check(nome: str, passou: bool, detalhe: str = "") -> None:
 
 
 # 1) Catálogo e schemas existem.
-for schema in ["bronze", "silver", "gold"]:
+for schema in ["bronze", "silver", "gold", "control"]:
     try:
         spark.sql(f"DESCRIBE SCHEMA {CATALOG}.{schema}").collect()
         check(f"schema {CATALOG}.{schema} existe", True)
