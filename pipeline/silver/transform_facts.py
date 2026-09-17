@@ -1,16 +1,29 @@
 # Databricks notebook source
-# pipeline/silver/transform_fatos.py
+# pipeline/silver/transform_facts.py
 # Processa todas as tabelas fato Bronze → Silver
 # Cast de tipos, schema drift, contrato, quarentena e MERGE idempotente
-# Código inline — imports instáveis em serverless
 
 from pyspark.sql import functions as F
 from pyspark.sql.window import Window
 from delta.tables import DeltaTable
 import json
 
-REPO     = "/Workspace/Users/<USER>/varejinho-data-platform"
-REGISTRY = "s3://varejinho-lake/_control/schema_registry"
+
+def job_param(nome: str, default: str) -> str:
+    """Lê parâmetro do Job; mantém fallback para execução manual do notebook."""
+    try:
+        return dbutils.widgets.get(nome)
+    except Exception:
+        return default
+
+
+CATALOG = job_param("catalog", "varejinho")
+BUNDLE_FILES_PATH = job_param(
+    "bundle_files_path",
+    "/Workspace/Users/<USER>/varejinho-data-platform",
+)
+CONTROL_ROOT = job_param("control_root", "s3://varejinho-lake/_control")
+REGISTRY = f"{CONTROL_ROOT}/schema_registry"
 
 CONFIG = {
     "notaentrada": {
@@ -84,7 +97,7 @@ CONFIG = {
     },
 }
 
-# ── Schema drift (inline) ────────────────────────────────────────────────────
+
 def detectar_drift(tabela, df, dbutils):
     schema_atual = {f.name: f.dataType.simpleString() for f in df.schema.fields}
     registry_file = f"{REGISTRY}/{tabela}.json"
@@ -93,7 +106,7 @@ def detectar_drift(tabela, df, dbutils):
         schema_anterior = json.loads(conteudo)
     except Exception:
         dbutils.fs.put(registry_file, json.dumps(schema_atual), overwrite=True)
-        print(f"[{tabela}] Schema baseline criado.")
+        print(f"[{tabela}] Schema baseline criado em {REGISTRY}.")
         return
 
     novas     = sorted(set(schema_atual) - set(schema_anterior))
@@ -109,7 +122,7 @@ def detectar_drift(tabela, df, dbutils):
 
     dbutils.fs.put(registry_file, json.dumps(schema_atual), overwrite=True)
 
-# ── Contract validator (inline) ──────────────────────────────────────────────
+
 def validar_contrato(tabela, df, contract_path):
     import yaml
     try:
@@ -166,16 +179,16 @@ def validar_contrato(tabela, df, contract_path):
     }
     return df_ok, df_quar, relatorio
 
-# ── Pipeline por tabela ──────────────────────────────────────────────────────
+
 def transformar(tabela: str, spark, dbutils, ultima_particao: str = None):
     cfg        = CONFIG[tabela]
-    BRONZE     = f"varejinho.bronze.{tabela}"
-    SILVER     = f"varejinho.silver.{tabela}"
-    QUARENTENA = f"varejinho.silver._quarantine_{tabela}"
-    HISTORICO  = f"varejinho.silver._quarantine_history_{tabela}"
-    CONTRACT   = f"{REPO}/contracts/silver/{tabela}.yaml"
+    BRONZE     = f"{CATALOG}.bronze.{tabela}"
+    SILVER     = f"{CATALOG}.silver.{tabela}"
+    QUARENTENA = f"{CATALOG}.silver._quarantine_{tabela}"
+    HISTORICO  = f"{CATALOG}.silver._quarantine_history_{tabela}"
+    CONTRACT   = f"{BUNDLE_FILES_PATH}/contracts/silver/{tabela}.yaml"
 
-    # 1. Leitura incremental
+    # 1. Leitura incremental (watermark será conectado no gate de incrementalidade)
     df = spark.table(BRONZE)
     if ultima_particao:
         df = df.where(F.col("ingestion_date") > F.lit(ultima_particao))
@@ -210,10 +223,10 @@ def transformar(tabela: str, spark, dbutils, ultima_particao: str = None):
             df = df.withColumn(col_extra,
                 F.expr(f"try_to_timestamp(`{col_extra}`, 'yyyy/MM/dd HH:mm:ss.SSS')"))
 
-    # 5. Schema drift — após cast, compara schema Silver com baseline
+    # 5. Schema drift — após cast, compara schema Silver com baseline do ambiente
     detectar_drift(tabela, df, dbutils)
 
-    # 6. Contrato
+    # 6. Contrato — arquivo sincronizado pelo Bundle
     df_ok, df_quar, relatorio = validar_contrato(tabela, df, CONTRACT)
     if relatorio:
         print(f"[{tabela}] {relatorio}")
@@ -239,9 +252,7 @@ def transformar(tabela: str, spark, dbutils, ultima_particao: str = None):
             writer = writer.partitionBy("ano", "mes")
         writer.saveAsTable(SILVER)
 
-    # 9. Quarentena
-    # _quarantine_<tabela> = snapshot da execução atual (usado pelo Quality Gate)
-    # _quarantine_history_<tabela> = histórico append-only para auditoria
+    # 9. Quarentena — snapshot atual + histórico append-only
     if spark.catalog.tableExists(QUARENTENA):
         spark.sql(f"TRUNCATE TABLE {QUARENTENA}")
 
@@ -259,8 +270,8 @@ def transformar(tabela: str, spark, dbutils, ultima_particao: str = None):
         print(f"[{tabela}] {relatorio['quarentena']} registros em quarentena nesta execução.")
 
     count = spark.table(SILVER).count()
-    print(f"✅ {tabela}: {count:,} linhas na Silver")
+    print(f"✅ {SILVER}: {count:,} linhas")
 
-# ── Execução ─────────────────────────────────────────────────────────────────
+
 for tabela in CONFIG:
     transformar(tabela, spark, dbutils)
