@@ -4,7 +4,20 @@ bundle:
 
 variables:
   catalog:
+    description: "Unity Catalog usado pelo target"
     default: varejinho
+  control_root:
+    description: "Raiz dos artefatos de controle do ambiente"
+    default: s3://varejinho-lake/_control
+
+# O databricks.yml vive em pipeline/, mas a execução também precisa de
+# contracts/ e quality/. Ao sincronizar caminhos acima do bundle root,
+# o CLI preserva a estrutura do repositório no workspace.
+sync:
+  paths:
+    - .
+    - ../contracts
+    - ../quality
 
 targets:
   dev:
@@ -12,49 +25,71 @@ targets:
     default: true
     variables:
       catalog: varejinho_dev
+      control_root: s3://varejinho-lake/_control/dev
+
   prod:
     mode: production
     variables:
       catalog: varejinho
+      control_root: s3://varejinho-lake/_control
+    resources:
+      jobs:
+        pipeline_diario:
+          schedule:
+            pause_status: UNPAUSED
+        manutencao_semanal:
+          schedule:
+            pause_status: UNPAUSED
+        dbt_tests:
+          schedule:
+            pause_status: UNPAUSED
 
 resources:
   jobs:
 
     pipeline_diario:
       name: "[${bundle.target}] Varejinho — Pipeline Diário"
+      # Dev fica PAUSED por padrão. Somente prod é liberado no override acima.
       schedule:
         quartz_cron_expression: "0 0 7,13,21 * * ?"
         timezone_id: "America/Fortaleza"
-        pause_status: UNPAUSED
+        pause_status: PAUSED
       email_notifications:
         on_failure:
           - <ALERT_EMAIL>
       max_concurrent_runs: 1
+      parameters:
+        - name: catalog
+          default: ${var.catalog}
+        - name: bundle_files_path
+          default: ${workspace.file_path}
+        - name: control_root
+          default: ${var.control_root}
       tasks:
         - task_key: bronze_quality_gate
           notebook_task:
-            notebook_path: ${workspace.file_path}/bronze/quality_gate.py
+            notebook_path: ${workspace.file_path}/pipeline/bronze/quality_gate.py
           description: "Valida Bronze antes de processar Silver"
 
         - task_key: silver_dimensions
           depends_on:
             - task_key: bronze_quality_gate
           notebook_task:
-            notebook_path: ${workspace.file_path}/silver/transform_dimensions.py
+            notebook_path: ${workspace.file_path}/pipeline/silver/transform_dimensions.py
           description: "SCD2 dimensões + SCD1 domínios + curvaabc snapshot"
 
         - task_key: silver_sales
           depends_on:
             - task_key: bronze_quality_gate
           notebook_task:
-            notebook_path: ${workspace.file_path}/silver/transform_sales.py
+            notebook_path: ${workspace.file_path}/pipeline/silver/transform_sales.py
           description: "Processa silver.venda com cast, contrato e schema drift"
 
         - task_key: silver_facts
           depends_on:
             - task_key: bronze_quality_gate
           notebook_task:
-            notebook_path: ${workspace.file_path}/silver/transform_facts.py
+            notebook_path: ${workspace.file_path}/pipeline/silver/transform_facts.py
           description: "Fatos transacionais e financeiros"
 
         - task_key: silver_quality_gate
@@ -63,14 +98,14 @@ resources:
             - task_key: silver_sales
             - task_key: silver_facts
           notebook_task:
-            notebook_path: ${workspace.file_path}/silver/quality_gate.py
+            notebook_path: ${workspace.file_path}/pipeline/silver/quality_gate.py
           description: "Valida Silver antes de construir Gold"
 
         - task_key: gold_dimensions
           depends_on:
             - task_key: silver_quality_gate
           notebook_task:
-            notebook_path: ${workspace.file_path}/gold/build_dimensions.py
+            notebook_path: ${workspace.file_path}/pipeline/gold/build_dimensions.py
           description: "Dimensões da Gold"
 
         - task_key: gold_facts
@@ -78,30 +113,33 @@ resources:
             - task_key: silver_quality_gate
             - task_key: gold_dimensions
           notebook_task:
-            notebook_path: ${workspace.file_path}/gold/build_facts.py
+            notebook_path: ${workspace.file_path}/pipeline/gold/build_facts.py
           description: "Fatos da Gold"
 
         - task_key: gold_quality_gate
           depends_on:
             - task_key: gold_facts
           notebook_task:
-            notebook_path: ${workspace.file_path}/gold/quality_gate.py
-          description: "35 checks — falha bloqueia e envia alerta"
+            notebook_path: ${workspace.file_path}/pipeline/gold/quality_gate.py
+          description: "Quality Gate da Gold — falha bloqueia e envia alerta"
 
     manutencao_semanal:
       name: "[${bundle.target}] Varejinho — Manutenção Semanal"
       schedule:
         quartz_cron_expression: "0 0 2 ? * SUN"
         timezone_id: "America/Fortaleza"
-        pause_status: UNPAUSED
+        pause_status: PAUSED
       email_notifications:
         on_failure:
           - <ALERT_EMAIL>
       max_concurrent_runs: 1
+      parameters:
+        - name: catalog
+          default: ${var.catalog}
       tasks:
         - task_key: optimize_vacuum
           notebook_task:
-            notebook_path: ${workspace.file_path}/gold/optimize.py
+            notebook_path: ${workspace.file_path}/pipeline/gold/optimize.py
           description: "OPTIMIZE + ZORDER + VACUUM em todas as tabelas Gold"
 
     dbt_tests:
@@ -109,7 +147,7 @@ resources:
       schedule:
         quartz_cron_expression: "0 0 8,14,22 * * ?"
         timezone_id: "America/Fortaleza"
-        pause_status: UNPAUSED
+        pause_status: PAUSED
       email_notifications:
         on_failure:
           - <ALERT_EMAIL>
@@ -133,6 +171,6 @@ resources:
             commands:
               - dbt test
             warehouse_id: cefc7bd879453309
-            catalog: varejinho
+            catalog: ${var.catalog}
             schema: gold
-          description: "dbt test — 7 testes singulares da Gold"
+          description: "dbt test — testes da Gold"
