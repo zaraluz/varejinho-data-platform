@@ -97,6 +97,25 @@ resources:
             notebook_path: ${workspace.file_path}/pipeline/silver/profile_scd2_changes.py
           description: "Atribui as mudanças observadas de produto aos atributos e compara dataalteracao x ingestion_date"
 
+    scd2_product_build:
+      name: "[${bundle.target}] Varejinho — Gate B3/B4 Product SCD2"
+      max_concurrent_runs: 1
+      parameters:
+        - name: catalog
+          default: ${var.catalog}
+      tasks:
+        - task_key: rebuild_product_history
+          notebook_task:
+            notebook_path: ${workspace.file_path}/pipeline/silver/build_scd2_product.py
+          description: "Reconstrói produto SCD2 a partir dos snapshots Bronze usando a política Type 1/Type 2 aprovada"
+
+        - task_key: validate_product_history
+          depends_on:
+            - task_key: rebuild_product_history
+          notebook_task:
+            notebook_path: ${workspace.file_path}/pipeline/silver/validate_scd2_product.py
+          description: "Valida cardinalidade, corrente única, intervalos, hash, Type 1 e estado current"
+
     pipeline_diario:
       name: "[${bundle.target}] Varejinho — Pipeline Diário"
       # Dev fica PAUSED por padrão. Somente prod é liberado no override acima.
