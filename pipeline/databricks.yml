@@ -743,6 +743,20 @@ resources:
             notebook_path: ${workspace.file_path}/pipeline/silver/profile_fact_incrementality.py
           description: "Profiling read-only de snapshots, grão, churn e cobertura antes de ligar watermark aos fatos"
 
+    facts_baseline_equivalence:
+      name: "[${bundle.target}] Varejinho — Gate D2 Facts Baseline Equivalence"
+      max_concurrent_runs: 1
+      parameters:
+        - name: catalog
+          default: ${var.catalog}
+        - name: bundle_files_path
+          default: ${workspace.file_path}
+      tasks:
+        - task_key: verify_fact_baseline_equivalence
+          notebook_task:
+            notebook_path: ${workspace.file_path}/pipeline/silver/verify_fact_baseline_equivalence.py
+          description: "Compara Bronze histórica transformada em memória com a Silver atual antes de semear watermark"
+
     pipeline_diario_hardened:
       name: "[${bundle.target}] Varejinho — Gate C1 Pipeline Diário Hardened"
       max_concurrent_runs: 1
