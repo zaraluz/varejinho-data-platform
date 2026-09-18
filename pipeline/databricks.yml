@@ -121,6 +121,64 @@ resources:
             notebook_path: ${workspace.file_path}/pipeline/silver/profile_scd2_supplier_changes.py
           description: "Mostra mudanças reais de fornecedor campo a campo e exemplos before/after antes de fechar Type 1/Type 2"
 
+    scd2_supplier_fixture:
+      name: "[${bundle.target}] Varejinho — Gate B7C Supplier SCD2 Fixture"
+      max_concurrent_runs: 1
+      parameters:
+        - name: catalog
+          default: ${var.catalog}
+      tasks:
+        - task_key: prepare_supplier_fixture
+          notebook_task:
+            notebook_path: ${workspace.file_path}/pipeline/silver/prepare_scd2_supplier_fixture.py
+          description: "Cria Bronze sintética isolada com mudanças Type 1, razão social Type 2 e CNPJ Type 2"
+
+        - task_key: build_supplier_fixture
+          depends_on:
+            - task_key: prepare_supplier_fixture
+          notebook_task:
+            notebook_path: ${workspace.file_path}/pipeline/silver/build_scd2_supplier.py
+            base_parameters:
+              bronze_table: ${var.catalog}.control._b7_supplier_fixture_bronze
+              silver_table: ${var.catalog}.silver._b7_supplier_fixture
+          description: "Executa o mesmo builder SCD2 de fornecedor sobre a fixture"
+
+        - task_key: validate_supplier_fixture
+          depends_on:
+            - task_key: build_supplier_fixture
+          notebook_task:
+            notebook_path: ${workspace.file_path}/pipeline/silver/validate_scd2_supplier.py
+            base_parameters:
+              bronze_table: ${var.catalog}.control._b7_supplier_fixture_bronze
+              silver_table: ${var.catalog}.silver._b7_supplier_fixture
+          description: "Roda invariantes SCD2 sobre a fixture sintética"
+
+        - task_key: verify_supplier_fixture
+          depends_on:
+            - task_key: validate_supplier_fixture
+          notebook_task:
+            notebook_path: ${workspace.file_path}/pipeline/silver/verify_scd2_supplier_fixture.py
+          description: "Prova os resultados esperados de Type 1/Type 2 e limpa o sandbox após sucesso"
+
+    scd2_supplier_build:
+      name: "[${bundle.target}] Varejinho — Gate B7D Supplier SCD2"
+      max_concurrent_runs: 1
+      parameters:
+        - name: catalog
+          default: ${var.catalog}
+      tasks:
+        - task_key: rebuild_supplier_history
+          notebook_task:
+            notebook_path: ${workspace.file_path}/pipeline/silver/build_scd2_supplier.py
+          description: "Reconstrói fornecedor SCD2 real em dev após aprovação da fixture"
+
+        - task_key: validate_supplier_history
+          depends_on:
+            - task_key: rebuild_supplier_history
+          notebook_task:
+            notebook_path: ${workspace.file_path}/pipeline/silver/validate_scd2_supplier.py
+          description: "Valida invariantes do fornecedor SCD2 real"
+
     scd2_product_build:
       name: "[${bundle.target}] Varejinho — Gate B3/B4 Product SCD2"
       max_concurrent_runs: 1
