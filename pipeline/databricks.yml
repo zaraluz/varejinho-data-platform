@@ -179,6 +179,98 @@ resources:
             notebook_path: ${workspace.file_path}/pipeline/silver/validate_scd2_supplier.py
           description: "Valida invariantes do fornecedor SCD2 real"
 
+    scd2_supplier_incremental_fixture:
+      name: "[${bundle.target}] Varejinho — Gate B7E Supplier Incremental Fixture"
+      max_concurrent_runs: 1
+      parameters:
+        - name: catalog
+          default: ${var.catalog}
+      tasks:
+        - task_key: prepare_supplier_incremental_fixture
+          notebook_task:
+            notebook_path: ${workspace.file_path}/pipeline/silver/prepare_scd2_supplier_incremental_fixture.py
+          description: "Cria baseline até D2, Bronze completa até D4 e watermark sandbox em D2"
+
+        - task_key: build_supplier_incremental_baseline
+          depends_on:
+            - task_key: prepare_supplier_incremental_fixture
+          notebook_task:
+            notebook_path: ${workspace.file_path}/pipeline/silver/build_scd2_supplier.py
+            base_parameters:
+              bronze_table: ${var.catalog}.control._b7e_supplier_baseline_bronze
+              silver_table: ${var.catalog}.silver._b7e_supplier_incremental
+          description: "Constrói a Silver sandbox apenas até o watermark inicial"
+
+        - task_key: apply_generic_incremental_supplier
+          depends_on:
+            - task_key: build_supplier_incremental_baseline
+          notebook_task:
+            notebook_path: ${workspace.file_path}/pipeline/silver/incremental_scd2.py
+            base_parameters:
+              entity: fornecedor
+              bronze_table: ${var.catalog}.control._b7e_supplier_full_bronze
+              silver_table: ${var.catalog}.silver._b7e_supplier_incremental
+              control_table: ${var.catalog}.control._b7e_supplier_watermark
+          description: "Processa D3/D4 com o engine SCD2 reutilizável, incluindo Type 1, Type 2, novo id e alerta de CNPJ"
+
+        - task_key: validate_generic_incremental_supplier
+          depends_on:
+            - task_key: apply_generic_incremental_supplier
+          notebook_task:
+            notebook_path: ${workspace.file_path}/pipeline/silver/validate_scd2_supplier.py
+            base_parameters:
+              bronze_table: ${var.catalog}.control._b7e_supplier_full_bronze
+              silver_table: ${var.catalog}.silver._b7e_supplier_incremental
+          description: "Valida invariantes contra toda a Bronze sintética antes do commit"
+
+        - task_key: commit_supplier_incremental_fixture_watermark
+          depends_on:
+            - task_key: validate_generic_incremental_supplier
+          notebook_task:
+            notebook_path: ${workspace.file_path}/pipeline/silver/commit_scd2_watermark.py
+            base_parameters:
+              entity: fornecedor
+              bronze_table: ${var.catalog}.control._b7e_supplier_full_bronze
+              control_table: ${var.catalog}.control._b7e_supplier_watermark
+          description: "Promove o watermark sandbox somente após o Quality Gate"
+
+        - task_key: verify_supplier_incremental_fixture
+          depends_on:
+            - task_key: commit_supplier_incremental_fixture_watermark
+          notebook_task:
+            notebook_path: ${workspace.file_path}/pipeline/silver/verify_scd2_supplier_incremental_fixture.py
+          description: "Prova versões, Type 1, novo id, boundaries e watermark; limpa sandbox após sucesso"
+
+    scd2_supplier_incremental:
+      name: "[${bundle.target}] Varejinho — Gate B7F Supplier SCD2 Incremental"
+      max_concurrent_runs: 1
+      parameters:
+        - name: catalog
+          default: ${var.catalog}
+      tasks:
+        - task_key: apply_incremental_supplier_scd2
+          notebook_task:
+            notebook_path: ${workspace.file_path}/pipeline/silver/incremental_scd2.py
+            base_parameters:
+              entity: fornecedor
+          description: "Processa somente snapshots novos de fornecedor com o engine SCD2 reutilizável"
+
+        - task_key: validate_incremental_supplier_scd2
+          depends_on:
+            - task_key: apply_incremental_supplier_scd2
+          notebook_task:
+            notebook_path: ${workspace.file_path}/pipeline/silver/validate_scd2_supplier.py
+          description: "Revalida os invariantes do fornecedor antes de avançar watermark"
+
+        - task_key: commit_supplier_watermark
+          depends_on:
+            - task_key: validate_incremental_supplier_scd2
+          notebook_task:
+            notebook_path: ${workspace.file_path}/pipeline/silver/commit_scd2_watermark.py
+            base_parameters:
+              entity: fornecedor
+          description: "Promove candidate para committed somente após Quality Gate"
+
     scd2_product_build:
       name: "[${bundle.target}] Varejinho — Gate B3/B4 Product SCD2"
       max_concurrent_runs: 1
