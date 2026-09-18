@@ -25,11 +25,23 @@ SNAPSHOT = "ingestion_date"
 # - CNPJ também merece alerta/auditoria se mudar sob o mesmo id ERP.
 TYPE2_COLS = ["cnpj", "razaosocial"]
 
-# Os demais atributos de negócio são Type 1 por enquanto:
-# contato, endereço, status cadastral e configurações operacionais.
-# A lista é derivada do schema da fonte para evitar preservar acidentalmente
-# histórico de um atributo que declaramos como current-state.
-TYPE1_EXCLUDE = {KEY, SNAPSHOT, "datacadastro", "dataalteracao", "_metadata", *TYPE2_COLS}
+# Data minimization: somente atributos explicitamente aprovados entram na Silver.
+# Campos de contato pessoal, credenciais, dados bancários/documentais e demais
+# colunas da Bronze NÃO são copiados por padrão.
+TYPE1_ALLOWLIST = [
+    "nomefantasia",
+    "id_situacaocadastro",
+    "id_tipoempresa",
+    "permitenfsempedido",
+    "id_tipocustocompra",
+    "id_tipocustodevolucaotroca",
+    "pedidominimoqtd",
+    "pedidominimovalor",
+    "valormaximoverbapedido",
+    "id_contacontabilfinanceiro",
+    "id_fornecedorfavorecido",
+    "id_municipio",
+]
 
 
 def parse_erp_timestamp(col_name: str):
@@ -49,7 +61,7 @@ missing = sorted(required - source_cols)
 if missing:
     raise Exception(f"Colunas obrigatórias ausentes em {BRONZE}: {missing}")
 
-TYPE1_COLS = [c for c in raw.columns if c not in TYPE1_EXCLUDE]
+TYPE1_COLS = [c for c in TYPE1_ALLOWLIST if c in source_cols]
 
 print("\n=== GATE B7 — BUILD SUPPLIER SCD2 ===")
 print(f"Fonte:   {BRONZE}")
@@ -149,6 +161,14 @@ versions = (
 
 helper_cols = ["_snapshot_ts", "_created_at", "_prev_hash", "_prev_cnpj"]
 versions = versions.drop(*helper_cols)
+
+# Schema curado: não deixar a largura da Bronze vazar para a Silver.
+OUTPUT_COLS = [
+    KEY, *TYPE2_COLS, *TYPE1_COLS, "datacadastro",
+    "hash_versao", "valid_from", "valid_to", "is_current",
+    "scd_source_snapshot", "valid_from_source",
+]
+versions = versions.select(*OUTPUT_COLS)
 
 (
     versions.write.format("delta")
