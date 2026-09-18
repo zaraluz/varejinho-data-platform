@@ -86,11 +86,10 @@ changed_array = F.array(*[
     F.when(F.col(flag), F.lit(c)).otherwise(F.lit(None).cast("string"))
     for c, flag in zip(changed_cols, flag_names)
 ])
+flagged = flagged.withColumn("_tmp", changed_array)
 flagged = flagged.withColumn(
-    "_changed_cols",
-    F.expr("filter(_tmp, x -> x is not null)")
-).drop("_tmp") if False else flagged.withColumn("_tmp", changed_array)
-flagged = flagged.withColumn("_changed_cols", F.expr("filter(_tmp, x -> x is not null)")).drop("_tmp")
+    "_changed_cols", F.expr("filter(_tmp, x -> x is not null)")
+).drop("_tmp")
 flagged = flagged.withColumn("_combo", F.concat_ws(" + ", F.col("_changed_cols")))
 
 print("\n=== GATE B7B — SUPPLIER CHANGE ATTRIBUTION ===")
