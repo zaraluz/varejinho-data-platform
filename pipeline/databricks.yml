@@ -414,6 +414,18 @@ resources:
               catalog: ${var.catalog}
           description: "Compara engine genérico vs full backfill por exceptAll e confirma estado real intocado"
 
+    scd2_mercadologico_profile:
+      name: "[${bundle.target}] Varejinho — Gate B8A Mercadologico SCD2 Profiling"
+      max_concurrent_runs: 1
+      parameters:
+        - name: catalog
+          default: ${var.catalog}
+      tasks:
+        - task_key: profile_mercadologico_semantics
+          notebook_task:
+            notebook_path: ${workspace.file_path}/pipeline/silver/profile_scd2_mercadologico.py
+          description: "Profiling read-only do mercadologico: schema, mudanças por atributo, candidatos temporais e estrutura hierárquica antes do modeling"
+
     scd2_product_build:
       name: "[${bundle.target}] Varejinho — Gate B3/B4 Product SCD2"
       max_concurrent_runs: 1
