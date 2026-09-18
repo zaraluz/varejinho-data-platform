@@ -48,6 +48,23 @@ CONFIG = {
         "change_compare": "snapshot",
         "identity_watch": ["cnpj"],
     },
+    "mercadologico": {
+        "bronze": f"{CATALOG}.bronze.mercadologico",
+        "silver": f"{CATALOG}.silver.mercadologico",
+        # Estrutura do nó: mover de pai/caminho ou trocar de nível muda a classificação histórica.
+        "type2": [
+            "mercadologico1", "mercadologico2", "mercadologico3",
+            "mercadologico4", "mercadologico5", "nivel",
+        ],
+        # Rótulo atual: renomear/corrigir descrição não cria versão histórica.
+        "type1": ["descricao"],
+        # A fonte não possui data de criação/alteração: só sabemos quando o estado foi observado.
+        "initial_valid_from": None,
+        "initial_compare": "snapshot",
+        "change_valid_from": None,
+        "change_compare": "snapshot",
+        "identity_watch": [],
+    },
 }
 
 if ENTITY not in CONFIG:
