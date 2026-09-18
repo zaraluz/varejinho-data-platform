@@ -177,7 +177,7 @@ first_bronze = (
 first_join = first_silver.join(first_bronze, on=KEY, how="left")
 bad_first_boundary = first_join.filter(
     F.col("_created_at").isNotNull()
-    & (F.col("_created_at") <= F.col("_snapshot_ts"))
+    & (F.to_date(F.col("_created_at")) <= F.to_date(F.col("_snapshot_ts")))
     & (
         (F.col("valid_from") != F.col("_created_at"))
         | (F.col("valid_from_source") != F.lit("datacadastro"))
