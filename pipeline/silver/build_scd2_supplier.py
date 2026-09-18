@@ -56,7 +56,7 @@ if not CATALOG.endswith("_dev"):
 
 raw = spark.table(BRONZE)
 source_cols = set(raw.columns)
-required = {KEY, SNAPSHOT, "datacadastro", *TYPE2_COLS}
+required = {KEY, SNAPSHOT, "datacadastro", *TYPE2_COLS, *TYPE1_ALLOWLIST}
 missing = sorted(required - source_cols)
 if missing:
     raise Exception(f"Colunas obrigatórias ausentes em {BRONZE}: {missing}")
