@@ -20,14 +20,33 @@ SILVER = job_param("silver_table", f"{CATALOG}.silver.fornecedor")
 KEY = "id"
 SNAPSHOT = "ingestion_date"
 TYPE2_COLS = ["cnpj", "razaosocial"]
-TYPE1_EXCLUDE = {KEY, SNAPSHOT, "datacadastro", "dataalteracao", "_metadata", *TYPE2_COLS}
+TYPE1_ALLOWLIST = [
+    "nomefantasia",
+    "id_situacaocadastro",
+    "id_tipoempresa",
+    "permitenfsempedido",
+    "id_tipocustocompra",
+    "id_tipocustodevolucaotroca",
+    "pedidominimoqtd",
+    "pedidominimovalor",
+    "valormaximoverbapedido",
+    "id_contacontabilfinanceiro",
+    "id_fornecedorfavorecido",
+    "id_municipio",
+]
+FORBIDDEN_SILVER_COLS = {
+    "senha",
+    "cpfprodutorrural",
+    "telefone",
+    "documento",
+}
 
 if not CATALOG.endswith("_dev"):
     raise Exception(f"validate_scd2_supplier só pode executar em *_dev. Recebido: {CATALOG}")
 
 bronze = spark.table(BRONZE)
 silver = spark.table(SILVER)
-TYPE1_COLS = [c for c in bronze.columns if c not in TYPE1_EXCLUDE]
+TYPE1_COLS = [c for c in TYPE1_ALLOWLIST if c in bronze.columns]
 
 print("\n=== GATE B7 — SUPPLIER SCD2 QUALITY GATE ===")
 print(f"Bronze: {BRONZE}")
@@ -139,6 +158,13 @@ check(
     "Todos os atributos Type 1 refletem o último snapshot",
     type1_failures,
     f"mismatches totais={type1_failures:,} em {len(TYPE1_COLS)} coluna(s)",
+)
+
+forbidden_present = sorted(FORBIDDEN_SILVER_COLS.intersection(set(silver.columns)))
+check(
+    "Data minimization: campos sensíveis/contato não estão na Silver",
+    len(forbidden_present),
+    f"presentes={forbidden_present}",
 )
 
 # Current deve refletir o último estado Type 2.
