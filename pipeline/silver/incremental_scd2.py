@@ -32,7 +32,7 @@ CONFIG = {
             "descricaoreduzida", "id_tipomercadoria", "pesoliquido", "pesobruto",
         ],
         "initial_valid_from": "datacadastro",
-        "initial_compare": "date",
+        "initial_compare": "timestamp",
         "change_valid_from": "dataalteracao",
         "change_compare": "timestamp",
         "identity_watch": [],
