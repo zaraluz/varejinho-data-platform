@@ -66,7 +66,6 @@ if len(v1) == 3:
 for col_name, expected in {
     "nomefantasia": "LOJA A ATUAL",
     "id_situacaocadastro": "0",
-    "telefone": "85777770000",
     "permitenfsempedido": "Y",
     "id_tipoempresa": "8",
 }.items():
@@ -80,7 +79,6 @@ if len(v2) == 1:
     check(
         "900002 Type 1 atualizado sem versionar",
         v2[0]["nomefantasia"] == "LOJA B PRIME"
-        and v2[0]["telefone"] == "85333330000"
         and v2[0]["permitenfsempedido"] == "Y",
     )
 
@@ -108,6 +106,10 @@ if len(wm_rows) == 1:
         f"candidate={w['candidate_snapshot']} | status={w['status']}"
     )
 check("Watermark avançou somente após validação", wm_ok, wm_detail)
+
+check("Telefone da Bronze não vaza para a Silver", "telefone" not in df.columns)
+check("Credencial senha não existe na Silver", "senha" not in df.columns)
+check("CPF produtor rural não existe na Silver", "cpfprodutorrural" not in df.columns)
 
 failed = [msg for ok, msg in checks if not ok]
 print(f"\n=== RESULTADO B7E: {len(checks)-len(failed)}/{len(checks)} checks passaram ===")
