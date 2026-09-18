@@ -434,7 +434,7 @@ resources:
           description: "Valida cardinalidade, corrente única, intervalos, hash, Type 1 e estado current"
 
     scd2_product_incremental:
-      name: "[${bundle.target}] Varejinho — Gate B5 Product SCD2 Incremental"
+      name: "[${bundle.target}] Varejinho — Product SCD2 Incremental (Generic Engine)"
       max_concurrent_runs: 1
       parameters:
         - name: catalog
@@ -442,25 +442,29 @@ resources:
       tasks:
         - task_key: apply_incremental_product_scd2
           notebook_task:
-            notebook_path: ${workspace.file_path}/pipeline/silver/incremental_scd2_product.py
-          description: "Processa somente snapshots Bronze posteriores ao watermark committed; Type 2 fecha/insere, Type 1 atualiza sem versionar"
+            notebook_path: ${workspace.file_path}/pipeline/silver/incremental_scd2.py
+            base_parameters:
+              entity: produto
+          description: "Processa produto com o engine SCD2 compartilhado, preservando a política temporal aprovada"
 
         - task_key: validate_incremental_product_scd2
           depends_on:
             - task_key: apply_incremental_product_scd2
           notebook_task:
             notebook_path: ${workspace.file_path}/pipeline/silver/validate_scd2_product.py
-          description: "Revalida todos os invariantes SCD2 antes de promover o watermark"
+          description: "Revalida os 21 invariantes antes de promover o watermark"
 
         - task_key: commit_product_watermark
           depends_on:
             - task_key: validate_incremental_product_scd2
           notebook_task:
-            notebook_path: ${workspace.file_path}/pipeline/silver/commit_scd2_product_watermark.py
-          description: "Promove candidate_snapshot para last_processed_snapshot somente após o Quality Gate passar"
+            notebook_path: ${workspace.file_path}/pipeline/silver/commit_scd2_watermark.py
+            base_parameters:
+              entity: produto
+          description: "Promove candidate_snapshot somente após o Quality Gate"
 
     scd2_product_replay:
-      name: "[${bundle.target}] Varejinho — Gate B6 Product SCD2 Replay"
+      name: "[${bundle.target}] Varejinho — Product SCD2 Replay (Generic Engine)"
       max_concurrent_runs: 1
       parameters:
         - name: catalog
@@ -468,19 +472,21 @@ resources:
       tasks:
         - task_key: prepare_replay_sandbox
           notebook_task:
-            notebook_path: ${workspace.file_path}/pipeline/silver/prepare_scd2_product_replay.py
-          description: "Cria cópias sandbox da Silver e controle com watermark recuado um snapshot; não toca no estado real"
+            notebook_path: ${workspace.file_path}/pipeline/silver/prepare_scd2_replay.py
+            base_parameters:
+              entity: produto
+          description: "Cria baseline, Silver replay e watermark sandbox recuado um snapshot; não toca no estado real"
 
         - task_key: replay_incremental_engine
           depends_on:
             - task_key: prepare_replay_sandbox
           notebook_task:
-            notebook_path: ${workspace.file_path}/pipeline/silver/incremental_scd2_product.py
+            notebook_path: ${workspace.file_path}/pipeline/silver/incremental_scd2.py
             base_parameters:
-              silver_table: ${var.catalog}.silver._b6_produto_replay
-              control_table: ${var.catalog}.control._b6_scd2_watermark
               entity: produto
-          description: "Executa o MESMO engine incremental B5 sobre o sandbox e reprocessa o último snapshot"
+              silver_table: ${var.catalog}.silver._replay_produto
+              control_table: ${var.catalog}.control._replay_produto_watermark
+          description: "Reprocessa o último snapshot de produto com o engine SCD2 compartilhado"
 
         - task_key: validate_replay_scd2
           depends_on:
@@ -488,25 +494,27 @@ resources:
           notebook_task:
             notebook_path: ${workspace.file_path}/pipeline/silver/validate_scd2_product.py
             base_parameters:
-              silver_table: ${var.catalog}.silver._b6_produto_replay
-          description: "Roda os 21 invariantes SCD2 sobre a cópia após o replay"
+              silver_table: ${var.catalog}.silver._replay_produto
+          description: "Roda os 21 invariantes sobre a cópia após replay"
 
         - task_key: commit_replay_watermark
           depends_on:
             - task_key: validate_replay_scd2
           notebook_task:
-            notebook_path: ${workspace.file_path}/pipeline/silver/commit_scd2_product_watermark.py
+            notebook_path: ${workspace.file_path}/pipeline/silver/commit_scd2_watermark.py
             base_parameters:
-              control_table: ${var.catalog}.control._b6_scd2_watermark
               entity: produto
-          description: "Promove o watermark somente no controle sandbox"
+              control_table: ${var.catalog}.control._replay_produto_watermark
+          description: "Promove somente o watermark sandbox após Quality Gate"
 
         - task_key: verify_replay_idempotency
           depends_on:
             - task_key: commit_replay_watermark
           notebook_task:
-            notebook_path: ${workspace.file_path}/pipeline/silver/verify_scd2_product_replay.py
-          description: "Compara antes/depois com exceptAll, prova igualdade exata e confirma que Silver/watermark reais não foram tocados"
+            notebook_path: ${workspace.file_path}/pipeline/silver/verify_scd2_replay.py
+            base_parameters:
+              entity: produto
+          description: "Compara baseline/replay com exceptAll e confirma Silver/watermark reais intactos"
 
     pipeline_diario:
       name: "[${bundle.target}] Varejinho — Pipeline Diário"
