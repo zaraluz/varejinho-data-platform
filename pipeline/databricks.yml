@@ -484,6 +484,151 @@ resources:
             notebook_path: ${workspace.file_path}/pipeline/silver/validate_scd2_mercadologico.py
           description: "Valida invariantes do mercadologico SCD2 real"
 
+    scd2_mercadologico_incremental_fixture:
+      name: "[${bundle.target}] Varejinho — Gate B8D Mercadologico Incremental Fixture"
+      max_concurrent_runs: 1
+      parameters:
+        - name: catalog
+          default: ${var.catalog}
+      tasks:
+        - task_key: prepare_mercadologico_incremental_fixture
+          notebook_task:
+            notebook_path: ${workspace.file_path}/pipeline/silver/prepare_scd2_mercadologico_incremental_fixture.py
+          description: "Cria baseline D2 + Bronze completa D4 + watermark sandbox D2"
+
+        - task_key: build_mercadologico_incremental_baseline
+          depends_on:
+            - task_key: prepare_mercadologico_incremental_fixture
+          notebook_task:
+            notebook_path: ${workspace.file_path}/pipeline/silver/build_scd2_mercadologico.py
+            base_parameters:
+              bronze_table: ${var.catalog}.control._b8d_mercadologico_baseline_bronze
+              silver_table: ${var.catalog}.silver._b8d_mercadologico_incremental
+          description: "Constrói o estado baseline até D2"
+
+        - task_key: apply_generic_incremental_mercadologico
+          depends_on:
+            - task_key: build_mercadologico_incremental_baseline
+          notebook_task:
+            notebook_path: ${workspace.file_path}/pipeline/silver/incremental_scd2.py
+            base_parameters:
+              entity: mercadologico
+              bronze_table: ${var.catalog}.control._b8d_mercadologico_full_bronze
+              silver_table: ${var.catalog}.silver._b8d_mercadologico_incremental
+              control_table: ${var.catalog}.control._b8d_mercadologico_watermark
+          description: "Processa D3/D4 com Type1, Type2 e novo id usando o engine genérico"
+
+        - task_key: validate_incremental_mercadologico_fixture
+          depends_on:
+            - task_key: apply_generic_incremental_mercadologico
+          notebook_task:
+            notebook_path: ${workspace.file_path}/pipeline/silver/validate_scd2_mercadologico.py
+            base_parameters:
+              bronze_table: ${var.catalog}.control._b8d_mercadologico_full_bronze
+              silver_table: ${var.catalog}.silver._b8d_mercadologico_incremental
+          description: "Valida os 19 invariantes antes do commit de watermark"
+
+        - task_key: commit_mercadologico_incremental_fixture_watermark
+          depends_on:
+            - task_key: validate_incremental_mercadologico_fixture
+          notebook_task:
+            notebook_path: ${workspace.file_path}/pipeline/silver/commit_scd2_watermark.py
+            base_parameters:
+              entity: mercadologico
+              bronze_table: ${var.catalog}.control._b8d_mercadologico_full_bronze
+              control_table: ${var.catalog}.control._b8d_mercadologico_watermark
+          description: "Promove watermark sandbox apenas após Quality Gate"
+
+        - task_key: verify_mercadologico_incremental_fixture
+          depends_on:
+            - task_key: commit_mercadologico_incremental_fixture_watermark
+          notebook_task:
+            notebook_path: ${workspace.file_path}/pipeline/silver/verify_scd2_mercadologico_incremental_fixture.py
+          description: "Prova versões, first-observed, Type1 e watermark; limpa sandbox após sucesso"
+
+    scd2_mercadologico_incremental:
+      name: "[${bundle.target}] Varejinho — Mercadologico SCD2 Incremental"
+      max_concurrent_runs: 1
+      parameters:
+        - name: catalog
+          default: ${var.catalog}
+      tasks:
+        - task_key: apply_incremental_mercadologico_scd2
+          notebook_task:
+            notebook_path: ${workspace.file_path}/pipeline/silver/incremental_scd2.py
+            base_parameters:
+              entity: mercadologico
+          description: "Processa apenas snapshots novos do mercadologico com first-observed boundaries"
+
+        - task_key: validate_incremental_mercadologico_scd2
+          depends_on:
+            - task_key: apply_incremental_mercadologico_scd2
+          notebook_task:
+            notebook_path: ${workspace.file_path}/pipeline/silver/validate_scd2_mercadologico.py
+          description: "Valida os 19 invariantes antes de avançar watermark"
+
+        - task_key: commit_mercadologico_watermark
+          depends_on:
+            - task_key: validate_incremental_mercadologico_scd2
+          notebook_task:
+            notebook_path: ${workspace.file_path}/pipeline/silver/commit_scd2_watermark.py
+            base_parameters:
+              entity: mercadologico
+          description: "Promove candidate somente após Quality Gate"
+
+    scd2_mercadologico_replay:
+      name: "[${bundle.target}] Varejinho — Mercadologico SCD2 Replay"
+      max_concurrent_runs: 1
+      parameters:
+        - name: catalog
+          default: ${var.catalog}
+      tasks:
+        - task_key: prepare_mercadologico_replay
+          notebook_task:
+            notebook_path: ${workspace.file_path}/pipeline/silver/prepare_scd2_replay.py
+            base_parameters:
+              entity: mercadologico
+          description: "Cria baseline, Silver replay e watermark sandbox recuado um snapshot"
+
+        - task_key: replay_mercadologico_incremental
+          depends_on:
+            - task_key: prepare_mercadologico_replay
+          notebook_task:
+            notebook_path: ${workspace.file_path}/pipeline/silver/incremental_scd2.py
+            base_parameters:
+              entity: mercadologico
+              silver_table: ${var.catalog}.silver._replay_mercadologico
+              control_table: ${var.catalog}.control._replay_mercadologico_watermark
+          description: "Reprocessa o último snapshot com o engine genérico"
+
+        - task_key: validate_mercadologico_replay
+          depends_on:
+            - task_key: replay_mercadologico_incremental
+          notebook_task:
+            notebook_path: ${workspace.file_path}/pipeline/silver/validate_scd2_mercadologico.py
+            base_parameters:
+              silver_table: ${var.catalog}.silver._replay_mercadologico
+          description: "Roda os 19 invariantes sobre a cópia após replay"
+
+        - task_key: commit_mercadologico_replay_watermark
+          depends_on:
+            - task_key: validate_mercadologico_replay
+          notebook_task:
+            notebook_path: ${workspace.file_path}/pipeline/silver/commit_scd2_watermark.py
+            base_parameters:
+              entity: mercadologico
+              control_table: ${var.catalog}.control._replay_mercadologico_watermark
+          description: "Promove somente o watermark sandbox"
+
+        - task_key: verify_mercadologico_replay
+          depends_on:
+            - task_key: commit_mercadologico_replay_watermark
+          notebook_task:
+            notebook_path: ${workspace.file_path}/pipeline/silver/verify_scd2_replay.py
+            base_parameters:
+              entity: mercadologico
+          description: "Prova igualdade exata antes/depois e estado real intocado"
+
     scd2_product_build:
       name: "[${bundle.target}] Varejinho — Gate B3/B4 Product SCD2"
       max_concurrent_runs: 1
