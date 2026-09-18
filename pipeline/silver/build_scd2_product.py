@@ -15,8 +15,8 @@ def job_param(nome: str, default: str) -> str:
 
 
 CATALOG = job_param("catalog", "varejinho_dev")
-BRONZE = f"{CATALOG}.bronze.produto"
-SILVER = f"{CATALOG}.silver.produto"
+BRONZE = job_param("bronze_table", f"{CATALOG}.bronze.produto")
+SILVER = job_param("silver_table", f"{CATALOG}.silver.produto")
 KEY = "id"
 SNAPSHOT = "ingestion_date"
 
