@@ -28,31 +28,64 @@ ontem = hoje - timedelta(days=1)
 
 # ── Fatos — volumetria e freshness ──────────────────────────
 FATOS = {
-    "venda":                   {"bronze_min": 0.95},
-    "notaentrada":             {"bronze_min": 0.40},  # extração parcial conhecida
-    "notaentradaitem":         {"bronze_min": 0.95},
-    "perda":                   {"bronze_min": 0.95},
-    "logestoque":              {"bronze_min": 0.95},
-    "promocao":                {"bronze_min": 0.08},  # full load com muita duplicata
-    "promocaoitem":            {"bronze_min": 0.08},
-    "pedido":                  {"bronze_min": 0.95},
-    "pedidoitem":              {"bronze_min": 0.95},
-    "oferta":                  {"bronze_min": 0.08},
-    "pagarfornecedor":         {"bronze_min": 0.95},
-    "pagarfornecedorparcela":  {"bronze_min": 0.08},  # full load histórico
-    "pagaroutrasdespesas":     {"bronze_min": 0.95},
-    "pagaroutrasdespesasimposto": {"bronze_min": 0.95},
+    "venda":                   {"mode": "row_ratio", "bronze_min": 0.95},
+    "notaentrada":             {"mode": "row_ratio", "bronze_min": 0.40},  # extração parcial conhecida
+    "notaentradaitem":         {"mode": "row_ratio", "bronze_min": 0.95},
+    "perda":                   {"mode": "row_ratio", "bronze_min": 0.95},
+    "logestoque":              {"mode": "row_ratio", "bronze_min": 0.95},
+
+    # Full-load diário: a Bronze acumula o mesmo id em vários snapshots,
+    # enquanto a Silver mantém apenas o último estado por chave.
+    # Comparar Silver / linhas brutas da Bronze faz o ratio cair a cada novo
+    # snapshot e inevitavelmente gera falso positivo. Aqui a cobertura correta
+    # é por chave distinta observada em toda a Bronze.
+    "promocao":                {"mode": "distinct_keys", "keys": ["id"]},
+    "promocaoitem":            {"mode": "distinct_keys", "keys": ["id"]},
+    "oferta":                  {"mode": "distinct_keys", "keys": ["id"]},
+    "pagarfornecedorparcela":  {"mode": "distinct_keys", "keys": ["id"]},
+
+    "pedido":                  {"mode": "row_ratio", "bronze_min": 0.95},
+    "pedidoitem":              {"mode": "row_ratio", "bronze_min": 0.95},
+    "pagarfornecedor":         {"mode": "row_ratio", "bronze_min": 0.95},
+    "pagaroutrasdespesas":     {"mode": "row_ratio", "bronze_min": 0.95},
+    "pagaroutrasdespesasimposto": {"mode": "row_ratio", "bronze_min": 0.95},
 }
 
 for tabela, cfg in FATOS.items():
     try:
-        bronze_count = spark.table(f"{CATALOG}.bronze.{tabela}").count()
-        silver_count = spark.table(f"{CATALOG}.silver.{tabela}").count()
+        bronze_df = spark.table(f"{CATALOG}.bronze.{tabela}")
+        silver_df = spark.table(f"{CATALOG}.silver.{tabela}")
 
-        ratio = silver_count / bronze_count if bronze_count > 0 else 0
-        check(f"{tabela} — volumetria",
-              ratio >= cfg["bronze_min"],
-              f"(Bronze: {bronze_count:,} | Silver: {silver_count:,} | ratio: {ratio:.2%})")
+        if cfg["mode"] == "distinct_keys":
+            keys = cfg["keys"]
+            bronze_raw = bronze_df.count()
+            bronze_keys = bronze_df.select(*keys).distinct().count()
+            silver_keys = silver_df.select(*keys).distinct().count()
+            missing_keys = (
+                bronze_df.select(*keys).distinct()
+                .join(silver_df.select(*keys).distinct(), on=keys, how="left_anti")
+                .count()
+            )
+            extra_keys = (
+                silver_df.select(*keys).distinct()
+                .join(bronze_df.select(*keys).distinct(), on=keys, how="left_anti")
+                .count()
+            )
+            check(
+                f"{tabela} — cobertura por chave distinta",
+                missing_keys == 0 and extra_keys == 0,
+                f"(Bronze raw: {bronze_raw:,} | Bronze keys: {bronze_keys:,} | "
+                f"Silver keys: {silver_keys:,} | missing: {missing_keys:,} | extra: {extra_keys:,})",
+            )
+        else:
+            bronze_count = bronze_df.count()
+            silver_count = silver_df.count()
+            ratio = silver_count / bronze_count if bronze_count > 0 else 0
+            check(
+                f"{tabela} — volumetria",
+                ratio >= cfg["bronze_min"],
+                f"(Bronze: {bronze_count:,} | Silver: {silver_count:,} | ratio: {ratio:.2%})",
+            )
 
         ultima = (spark.table(f"{CATALOG}.silver.{tabela}")
                   .agg(F.max("ingestion_date")).collect()[0][0])
