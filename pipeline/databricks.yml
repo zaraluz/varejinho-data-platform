@@ -731,6 +731,18 @@ resources:
               entity: produto
           description: "Compara baseline/replay com exceptAll e confirma Silver/watermark reais intactos"
 
+    facts_incremental_profile:
+      name: "[${bundle.target}] Varejinho — Gate D1 Facts Incrementality Profiling"
+      max_concurrent_runs: 1
+      parameters:
+        - name: catalog
+          default: ${var.catalog}
+      tasks:
+        - task_key: profile_fact_incrementality
+          notebook_task:
+            notebook_path: ${workspace.file_path}/pipeline/silver/profile_fact_incrementality.py
+          description: "Profiling read-only de snapshots, grão, churn e cobertura antes de ligar watermark aos fatos"
+
     pipeline_diario_hardened:
       name: "[${bundle.target}] Varejinho — Gate C1 Pipeline Diário Hardened"
       max_concurrent_runs: 1
