@@ -22,19 +22,19 @@ spark.sql(f"DROP TABLE IF EXISTS {FIXTURE_SILVER}")
 
 rows = [
     # id 900001 — primeira versão.
-    ("900001","FORNECEDOR A LTDA","LOJA A","11111111000111","1","85999990000","N","3","2026/01/01 00:00:00.000000000","2026-09-01"),
+    ("900001","FORNECEDOR A LTDA","LOJA A","11111111000111","1","85999990000","N","3","1","1","10","100","500","700","900001","2304400","2026/01/01 00:00:00.000000000","2026-09-01"),
     # D2 — somente Type 1: NÃO pode criar nova versão.
-    ("900001","FORNECEDOR A LTDA","LOJA A NOVA","11111111000111","0","85888880000","Y","8","2026/01/01 00:00:00.000000000","2026-09-02"),
+    ("900001","FORNECEDOR A LTDA","LOJA A NOVA","11111111000111","0","85888880000","Y","8","1","1","10","100","500","700","900001","2304400","2026/01/01 00:00:00.000000000","2026-09-02"),
     # D3 — razão social muda: Type 2, nova versão em ingestion_date.
-    ("900001","FORNECEDOR A COMERCIO LTDA","LOJA A NOVA","11111111000111","0","85888880000","Y","8","2026/01/01 00:00:00.000000000","2026-09-03"),
+    ("900001","FORNECEDOR A COMERCIO LTDA","LOJA A NOVA","11111111000111","0","85888880000","Y","8","1","1","10","100","500","700","900001","2304400","2026/01/01 00:00:00.000000000","2026-09-03"),
     # D4 — CNPJ muda: Type 2 + alerta de identidade.
-    ("900001","FORNECEDOR A COMERCIO LTDA","LOJA A ATUAL","22222222000122","0","85777770000","Y","8","2026/01/01 00:00:00.000000000","2026-09-04"),
+    ("900001","FORNECEDOR A COMERCIO LTDA","LOJA A ATUAL","22222222000122","0","85777770000","Y","8","1","1","10","100","500","700","900001","2304400","2026/01/01 00:00:00.000000000","2026-09-04"),
 
     # id 900002 — aparece depois; primeira versão vem de datacadastro.
-    ("900002","FORNECEDOR B LTDA","LOJA B","33333333000133","1","85444440000","N","3","2026/09/02 08:00:00.000000000","2026-09-02"),
+    ("900002","FORNECEDOR B LTDA","LOJA B","33333333000133","1","85444440000","N","3","2","2","20","200","600","701","900002","2304400","2026/09/02 08:00:00.000000000","2026-09-02"),
     # somente Type 1.
-    ("900002","FORNECEDOR B LTDA","LOJA B PRIME","33333333000133","1","85333330000","Y","3","2026/09/02 08:00:00.000000000","2026-09-03"),
-    ("900002","FORNECEDOR B LTDA","LOJA B PRIME","33333333000133","1","85333330000","Y","3","2026/09/02 08:00:00.000000000","2026-09-04"),
+    ("900002","FORNECEDOR B LTDA","LOJA B PRIME","33333333000133","1","85333330000","Y","3","2","2","20","200","600","701","900002","2304400","2026/09/02 08:00:00.000000000","2026-09-03"),
+    ("900002","FORNECEDOR B LTDA","LOJA B PRIME","33333333000133","1","85333330000","Y","3","2","2","20","200","600","701","900002","2304400","2026/09/02 08:00:00.000000000","2026-09-04"),
 ]
 
 schema = """
@@ -46,6 +46,14 @@ id_situacaocadastro string,
 telefone string,
 permitenfsempedido string,
 id_tipoempresa string,
+id_tipocustocompra string,
+id_tipocustodevolucaotroca string,
+pedidominimoqtd string,
+pedidominimovalor string,
+valormaximoverbapedido string,
+id_contacontabilfinanceiro string,
+id_fornecedorfavorecido string,
+id_municipio string,
 datacadastro string,
 ingestion_date string
 """
