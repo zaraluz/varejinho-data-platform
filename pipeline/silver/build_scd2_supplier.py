@@ -100,7 +100,7 @@ change_points = change_points.withColumn(
         F.col("_prev_hash").isNull(),
         F.when(
             F.col("_created_at").isNotNull()
-            & (F.col("_created_at") <= F.col("_snapshot_ts")),
+            & (F.to_date(F.col("_created_at")) <= F.col(SNAPSHOT).cast("date")),
             F.col("_created_at"),
         ).otherwise(F.col("_snapshot_ts")),
     ).otherwise(F.col("_snapshot_ts")),
@@ -111,6 +111,7 @@ change_points = change_points.withColumn(
     F.when(
         F.col("_prev_hash").isNull()
         & F.col("_created_at").isNotNull()
+        & (F.to_date(F.col("_created_at")) <= F.col(SNAPSHOT).cast("date"))
         & (F.col("valid_from") == F.col("_created_at")),
         F.lit("datacadastro"),
     ).otherwise(F.lit("ingestion_date")),
