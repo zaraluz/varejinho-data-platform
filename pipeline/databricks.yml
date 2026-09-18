@@ -324,6 +324,96 @@ resources:
               entity: fornecedor
           description: "Compara baseline/replay com exceptAll e confirma Silver/watermark reais intactos"
 
+    scd2_product_generic_regression:
+      name: "[${bundle.target}] Varejinho — Gate B7H Product Generic Engine Regression"
+      max_concurrent_runs: 1
+      tasks:
+        - task_key: prepare_product_generic_regression
+          notebook_task:
+            notebook_path: ${workspace.file_path}/pipeline/silver/prepare_scd2_product_generic_regression.py
+            base_parameters:
+              catalog: ${var.catalog}
+          description: "Escolhe snapshot histórico com mudanças reais, cria Bronze baseline/test e preserva baseline do estado real"
+
+        - task_key: build_product_baseline
+          depends_on:
+            - task_key: prepare_product_generic_regression
+          notebook_task:
+            notebook_path: ${workspace.file_path}/pipeline/silver/build_scd2_product.py
+            base_parameters:
+              catalog: ${var.catalog}
+              bronze_table: ${var.catalog}.control._b7h_product_baseline_bronze
+              silver_table: ${var.catalog}.silver._b7h_product_generic
+          description: "Reconstrói a Silver sandbox somente até o snapshot anterior"
+
+        - task_key: build_product_expected
+          depends_on:
+            - task_key: prepare_product_generic_regression
+          notebook_task:
+            notebook_path: ${workspace.file_path}/pipeline/silver/build_scd2_product.py
+            base_parameters:
+              catalog: ${var.catalog}
+              bronze_table: ${var.catalog}.control._b7h_product_test_bronze
+              silver_table: ${var.catalog}.silver._b7h_product_expected
+          description: "Constrói por full backfill o estado esperado até o snapshot exercitado"
+
+        - task_key: apply_generic_product_incremental
+          depends_on:
+            - task_key: build_product_baseline
+          notebook_task:
+            notebook_path: ${workspace.file_path}/pipeline/silver/incremental_scd2.py
+            base_parameters:
+              catalog: ${var.catalog}
+              entity: produto
+              bronze_table: ${var.catalog}.control._b7h_product_test_bronze
+              silver_table: ${var.catalog}.silver._b7h_product_generic
+              control_table: ${var.catalog}.control._b7h_product_watermark
+          description: "Processa o snapshot escolhido com o engine SCD2 genérico"
+
+        - task_key: validate_generic_product
+          depends_on:
+            - task_key: apply_generic_product_incremental
+          notebook_task:
+            notebook_path: ${workspace.file_path}/pipeline/silver/validate_scd2_product.py
+            base_parameters:
+              catalog: ${var.catalog}
+              bronze_table: ${var.catalog}.control._b7h_product_test_bronze
+              silver_table: ${var.catalog}.silver._b7h_product_generic
+          description: "Roda os 21 invariantes sobre o resultado do engine genérico"
+
+        - task_key: validate_expected_product
+          depends_on:
+            - task_key: build_product_expected
+          notebook_task:
+            notebook_path: ${workspace.file_path}/pipeline/silver/validate_scd2_product.py
+            base_parameters:
+              catalog: ${var.catalog}
+              bronze_table: ${var.catalog}.control._b7h_product_test_bronze
+              silver_table: ${var.catalog}.silver._b7h_product_expected
+          description: "Valida independentemente o full backfill usado como referência"
+
+        - task_key: commit_generic_product_watermark
+          depends_on:
+            - task_key: validate_generic_product
+          notebook_task:
+            notebook_path: ${workspace.file_path}/pipeline/silver/commit_scd2_watermark.py
+            base_parameters:
+              catalog: ${var.catalog}
+              entity: produto
+              bronze_table: ${var.catalog}.control._b7h_product_test_bronze
+              control_table: ${var.catalog}.control._b7h_product_watermark
+          description: "Promove apenas o watermark sandbox após o Quality Gate genérico"
+
+        - task_key: verify_product_generic_regression
+          depends_on:
+            - task_key: commit_generic_product_watermark
+            - task_key: validate_expected_product
+          notebook_task:
+            notebook_path: ${workspace.file_path}/pipeline/silver/verify_scd2_product_generic_regression.py
+            base_parameters:
+              catalog: ${var.catalog}
+          description: "Compara engine genérico vs full backfill por exceptAll e confirma estado real intocado"
+
     scd2_product_build:
       name: "[${bundle.target}] Varejinho — Gate B3/B4 Product SCD2"
       max_concurrent_runs: 1
