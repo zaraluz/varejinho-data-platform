@@ -757,6 +757,18 @@ resources:
             notebook_path: ${workspace.file_path}/pipeline/silver/verify_fact_baseline_equivalence.py
           description: "Compara Bronze histórica transformada em memória com a Silver atual antes de semear watermark"
 
+    facts_watermark_seed:
+      name: "[${bundle.target}] Varejinho — Gate D3 Facts Watermark Seed"
+      max_concurrent_runs: 1
+      parameters:
+        - name: catalog
+          default: ${var.catalog}
+      tasks:
+        - task_key: seed_fact_watermarks
+          notebook_task:
+            notebook_path: ${workspace.file_path}/pipeline/silver/seed_fact_watermark.py
+          description: "Semeia 13 watermarks a partir do maior ingestion_date já comprovadamente materializado na Silver"
+
     pipeline_diario_hardened:
       name: "[${bundle.target}] Varejinho — Gate C1 Pipeline Diário Hardened"
       max_concurrent_runs: 1
