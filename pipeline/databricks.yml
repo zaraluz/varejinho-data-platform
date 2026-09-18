@@ -109,6 +109,18 @@ resources:
             notebook_path: ${workspace.file_path}/pipeline/silver/profile_scd2_supplier.py
           description: "Profiling read-only do fornecedor: schema, cardinalidade, change attribution e campos temporais antes de modelar Type 1/Type 2"
 
+    scd2_supplier_changes:
+      name: "[${bundle.target}] Varejinho — Gate B7B Supplier Change Attribution"
+      max_concurrent_runs: 1
+      parameters:
+        - name: catalog
+          default: ${var.catalog}
+      tasks:
+        - task_key: profile_supplier_changes
+          notebook_task:
+            notebook_path: ${workspace.file_path}/pipeline/silver/profile_scd2_supplier_changes.py
+          description: "Mostra mudanças reais de fornecedor campo a campo e exemplos before/after antes de fechar Type 1/Type 2"
+
     scd2_product_build:
       name: "[${bundle.target}] Varejinho — Gate B3/B4 Product SCD2"
       max_concurrent_runs: 1
