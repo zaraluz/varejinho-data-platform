@@ -97,6 +97,18 @@ resources:
             notebook_path: ${workspace.file_path}/pipeline/silver/profile_scd2_changes.py
           description: "Atribui as mudanças observadas de produto aos atributos e compara dataalteracao x ingestion_date"
 
+    scd2_supplier_profile:
+      name: "[${bundle.target}] Varejinho — Gate B7A Supplier SCD2 Profiling"
+      max_concurrent_runs: 1
+      parameters:
+        - name: catalog
+          default: ${var.catalog}
+      tasks:
+        - task_key: profile_supplier_semantics
+          notebook_task:
+            notebook_path: ${workspace.file_path}/pipeline/silver/profile_scd2_supplier.py
+          description: "Profiling read-only do fornecedor: schema, cardinalidade, change attribution e campos temporais antes de modelar Type 1/Type 2"
+
     scd2_product_build:
       name: "[${bundle.target}] Varejinho — Gate B3/B4 Product SCD2"
       max_concurrent_runs: 1
