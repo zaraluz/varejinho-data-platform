@@ -74,7 +74,6 @@ if len(v1_rows) == 3:
 t1_expected = {
     "nomefantasia": "LOJA A ATUAL",
     "id_situacaocadastro": "0",
-    "telefone": "85777770000",
     "permitenfsempedido": "Y",
     "id_tipoempresa": "8",
 }
@@ -96,9 +95,12 @@ if len(v2_rows) == 1:
     check(
         "Type 1 do fornecedor 900002 não criou nova versão",
         v2_rows[0]["nomefantasia"] == "LOJA B PRIME"
-        and v2_rows[0]["permitenfsempedido"] == "Y"
-        and v2_rows[0]["telefone"] == "85333330000",
+        and v2_rows[0]["permitenfsempedido"] == "Y",
     )
+
+check("Telefone da Bronze não vaza para a Silver", "telefone" not in df.columns)
+check("Credencial senha não existe na Silver", "senha" not in df.columns)
+check("CPF produtor rural não existe na Silver", "cpfprodutorrural" not in df.columns)
 
 failed = [msg for ok, msg in checks if not ok]
 print(f"\n=== RESULTADO B7C: {len(checks)-len(failed)}/{len(checks)} checks passaram ===")
