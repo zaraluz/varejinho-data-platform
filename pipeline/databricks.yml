@@ -1929,17 +1929,33 @@ resources:
             notebook_path: ${workspace.file_path}/pipeline/gold/profile_temporal_boundaries.py
           description: "Explica eventos anteriores à primeira versão SCD2 sem alterar Silver/Gold"
 
-    gold_temporal_policy_impact:
-      name: "[${bundle.target}] Varejinho — Gate G3 Temporal Policy Impact"
+    gold_temporal_apply:
+      name: "[${bundle.target}] Varejinho — Gold Temporal Apply"
       max_concurrent_runs: 1
       parameters:
         - name: catalog
           default: ${var.catalog}
+        - name: bundle_files_path
+          default: ${workspace.file_path}
       tasks:
-        - task_key: profile_temporal_policy_impact
+        - task_key: rebuild_gold_dimensions
           notebook_task:
-            notebook_path: ${workspace.file_path}/pipeline/gold/profile_temporal_policy_impact.py
-          description: "Mede impacto de join temporal estrito e unresolved before-first sem alterar Gold"
+            notebook_path: ${workspace.file_path}/pipeline/gold/build_dimensions.py
+          description: "Recria somente as dimensões Gold a partir da Silver SCD2 já aprovada"
+
+        - task_key: rebuild_gold_facts
+          depends_on:
+            - task_key: rebuild_gold_dimensions
+          notebook_task:
+            notebook_path: ${workspace.file_path}/pipeline/gold/build_facts.py
+          description: "Recria os fatos Gold com os joins temporais aprovados"
+
+        - task_key: validate_gold_temporal
+          depends_on:
+            - task_key: rebuild_gold_facts
+          notebook_task:
+            notebook_path: ${workspace.file_path}/pipeline/gold/quality_gate.py
+          description: "Valida SKs temporais, overlaps, unresolved explicados e invariantes Gold"
 
     pipeline_diario:
       name: "[${bundle.target}] Varejinho — Pipeline Diário"
