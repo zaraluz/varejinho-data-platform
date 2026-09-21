@@ -1917,6 +1917,18 @@ resources:
             notebook_path: ${workspace.file_path}/pipeline/gold/profile_temporal_semantics.py
           description: "Compara join atual vs temporal nas facts candidatas sem alterar Gold"
 
+    gold_temporal_boundary_profile:
+      name: "[${bundle.target}] Varejinho — Gate G2 Temporal Boundary Profile"
+      max_concurrent_runs: 1
+      parameters:
+        - name: catalog
+          default: ${var.catalog}
+      tasks:
+        - task_key: profile_before_first_boundaries
+          notebook_task:
+            notebook_path: ${workspace.file_path}/pipeline/gold/profile_temporal_boundaries.py
+          description: "Explica eventos anteriores à primeira versão SCD2 sem alterar Silver/Gold"
+
     pipeline_diario:
       name: "[${bundle.target}] Varejinho — Pipeline Diário"
       # Schedules ficam PAUSED durante hardening; o Release Gate decide quando liberar prod.
