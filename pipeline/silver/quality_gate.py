@@ -15,6 +15,8 @@ def job_param(nome: str, default: str) -> str:
 
 
 CATALOG = job_param("catalog", "varejinho")
+BRONZE_SOURCE_CATALOG = job_param("bronze_source_catalog", "varejinho")
+FACT_WATERMARK = f"{CATALOG}.control.fact_watermark"
 resultados = []
 
 
@@ -26,78 +28,136 @@ def check(nome, passou, detalhe=""):
 hoje = datetime.now(timezone.utc).date()
 ontem = hoje - timedelta(days=1)
 
-# ── Fatos — volumetria e freshness ──────────────────────────
-FATOS = {
-    "venda":                   {"mode": "row_ratio", "bronze_min": 0.95},
-    "notaentrada":             {"mode": "row_ratio", "bronze_min": 0.40},  # extração parcial conhecida
-    "notaentradaitem":         {"mode": "row_ratio", "bronze_min": 0.95},
-    "perda":                   {"mode": "row_ratio", "bronze_min": 0.95},
-    "logestoque":              {"mode": "row_ratio", "bronze_min": 0.95},
+# ── Fatos — venda legacy + facts incrementais por partição madura ─────────
 
-    # Full-load diário: a Bronze acumula o mesmo id em vários snapshots,
-    # enquanto a Silver mantém apenas o último estado por chave.
-    # Comparar Silver / linhas brutas da Bronze faz o ratio cair a cada novo
-    # snapshot e inevitavelmente gera falso positivo. Aqui a cobertura correta
-    # é por chave distinta observada em toda a Bronze.
-    "promocao":                {"mode": "distinct_keys", "keys": ["id"]},
-    "promocaoitem":            {"mode": "distinct_keys", "keys": ["id"]},
-    "oferta":                  {"mode": "distinct_keys", "keys": ["id"]},
-    "pagarfornecedorparcela":  {"mode": "distinct_keys", "keys": ["id"]},
+# venda ainda usa o fluxo legado e será hardenizada separadamente.
+try:
+    bronze_venda = spark.table(f"{CATALOG}.bronze.venda")
+    silver_venda = spark.table(f"{CATALOG}.silver.venda")
 
-    "pedido":                  {"mode": "row_ratio", "bronze_min": 0.95},
-    "pedidoitem":              {"mode": "row_ratio", "bronze_min": 0.95},
-    "pagarfornecedor":         {"mode": "row_ratio", "bronze_min": 0.95},
-    "pagaroutrasdespesas":     {"mode": "row_ratio", "bronze_min": 0.95},
-    "pagaroutrasdespesasimposto": {"mode": "row_ratio", "bronze_min": 0.95},
-}
+    bronze_count = bronze_venda.count()
+    silver_count = silver_venda.count()
+    ratio = silver_count / bronze_count if bronze_count > 0 else 0
 
-for tabela, cfg in FATOS.items():
+    check(
+        "venda — volumetria",
+        ratio >= 0.95,
+        f"(Bronze: {bronze_count:,} | Silver: {silver_count:,} | ratio: {ratio:.2%})",
+    )
+
+    ultima = silver_venda.agg(F.max("ingestion_date")).collect()[0][0]
+    if ultima:
+        ultima_date = (
+            ultima
+            if isinstance(ultima, type(hoje))
+            else ultima.date() if hasattr(ultima, "date") else None
+        )
+        if ultima_date:
+            check(
+                "venda — freshness",
+                ultima_date >= ontem,
+                f"(última partição: {ultima_date})",
+            )
+
+except Exception as e:
+    resultados.append(f"❌ venda: {str(e)[:150]}")
+
+
+INCREMENTAL_FACTS = [
+    "notaentrada",
+    "notaentradaitem",
+    "perda",
+    "logestoque",
+    "promocao",
+    "promocaoitem",
+    "pedido",
+    "pedidoitem",
+    "oferta",
+    "pagarfornecedor",
+    "pagarfornecedorparcela",
+    "pagaroutrasdespesas",
+    "pagaroutrasdespesasimposto",
+]
+
+# Para essas 13 tabelas, o invariant diário não é mais Silver/full Bronze ratio.
+# Gate D5C provou que a partição do dia D permanece aberta até D+1.
+# O QG agora valida o estado operacional incremental:
+#   - watermark existe e está COMMITTED;
+#   - candidate está limpo;
+#   - committed == maior partição fisicamente madura;
+#   - Silver não contém ingestion_date acima desse cutoff.
+for tabela in INCREMENTAL_FACTS:
     try:
-        bronze_df = spark.table(f"{CATALOG}.bronze.{tabela}")
-        silver_df = spark.table(f"{CATALOG}.silver.{tabela}")
+        source = f"{BRONZE_SOURCE_CATALOG}.bronze.{tabela}"
 
-        if cfg["mode"] == "distinct_keys":
-            keys = cfg["keys"]
-            bronze_raw = bronze_df.count()
-            bronze_keys = bronze_df.select(*keys).distinct().count()
-            silver_keys = silver_df.select(*keys).distinct().count()
-            missing_keys = (
-                bronze_df.select(*keys).distinct()
-                .join(silver_df.select(*keys).distinct(), on=keys, how="left_anti")
-                .count()
-            )
-            extra_keys = (
-                silver_df.select(*keys).distinct()
-                .join(bronze_df.select(*keys).distinct(), on=keys, how="left_anti")
-                .count()
-            )
-            check(
-                f"{tabela} — cobertura por chave distinta",
-                missing_keys == 0 and extra_keys == 0,
-                f"(Bronze raw: {bronze_raw:,} | Bronze keys: {bronze_keys:,} | "
-                f"Silver keys: {silver_keys:,} | missing: {missing_keys:,} | extra: {extra_keys:,})",
-            )
-        else:
-            bronze_count = bronze_df.count()
-            silver_count = silver_df.count()
-            ratio = silver_count / bronze_count if bronze_count > 0 else 0
-            check(
-                f"{tabela} — volumetria",
-                ratio >= cfg["bronze_min"],
-                f"(Bronze: {bronze_count:,} | Silver: {silver_count:,} | ratio: {ratio:.2%})",
-            )
+        maturity = spark.sql(f"""
+            SELECT
+                ingestion_date,
+                MIN(to_date(_metadata.file_modification_time)) AS min_modified_date
+            FROM {source}
+            GROUP BY ingestion_date
+        """)
 
-        ultima = (spark.table(f"{CATALOG}.silver.{tabela}")
-                  .agg(F.max("ingestion_date")).collect()[0][0])
-        if ultima:
-            ultima_date = ultima if isinstance(ultima, type(hoje)) else ultima.date() if hasattr(ultima, 'date') else None
-            if ultima_date:
-                check(f"{tabela} — freshness",
-                      ultima_date >= ontem,
-                      f"(última partição: {ultima_date})")
+        mature_cutoff = (
+            maturity
+            .filter(F.col("min_modified_date") > F.col("ingestion_date"))
+            .agg(F.max("ingestion_date").alias("mature_cutoff"))
+            .collect()[0]["mature_cutoff"]
+        )
+
+        states = (
+            spark.table(FACT_WATERMARK)
+            .filter(F.col("entity") == tabela)
+            .collect()
+        )
+
+        check(
+            f"{tabela} — watermark único",
+            len(states) == 1,
+            f"(rows de controle: {len(states)})",
+        )
+
+        if len(states) != 1:
+            continue
+
+        state = states[0]
+        committed = state["last_processed_snapshot"]
+        candidate = state["candidate_snapshot"]
+        status = state["status"]
+
+        state_ok = (
+            mature_cutoff is not None
+            and status == "COMMITTED"
+            and candidate is None
+            and committed == mature_cutoff
+        )
+
+        check(
+            f"{tabela} — alinhado à partição madura",
+            state_ok,
+            f"(committed: {committed} | mature_cutoff: {mature_cutoff} | "
+            f"candidate: {candidate} | status: {status})",
+        )
+
+        silver_max = (
+            spark.table(f"{CATALOG}.silver.{tabela}")
+            .agg(F.max("ingestion_date").alias("max_ingestion_date"))
+            .collect()[0]["max_ingestion_date"]
+        )
+
+        no_future = (
+            mature_cutoff is not None
+            and (silver_max is None or silver_max <= mature_cutoff)
+        )
+
+        check(
+            f"{tabela} — sem partição aberta na Silver",
+            no_future,
+            f"(Silver max ingestion_date: {silver_max} | mature_cutoff: {mature_cutoff})",
+        )
 
     except Exception as e:
-        resultados.append(f"❌ {tabela}: {str(e)[:100]}")
+        resultados.append(f"❌ {tabela} incremental QG: {str(e)[:200]}")
 
 # ── SCD2 — integridade das dimensões ────────────────────────
 for dim in ["produto", "fornecedor", "mercadologico"]:
