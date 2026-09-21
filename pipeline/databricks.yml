@@ -1230,6 +1230,20 @@ resources:
               entity: notaentradaitem
           description: "Usa _metadata da external table para relacionar ingestion_date com file path/modification time e confirmar mecanismo de mutabilidade"
 
+    facts_partition_maturity_diagnostic:
+      name: "[${bundle.target}] Varejinho — Gate D5C Fact Partition Maturity"
+      max_concurrent_runs: 1
+      parameters:
+        - name: catalog
+          default: ${var.catalog}
+        - name: bronze_source_catalog
+          default: ${var.bronze_source_catalog}
+      tasks:
+        - task_key: diagnose_fact_partition_maturity
+          notebook_task:
+            notebook_path: ${workspace.file_path}/pipeline/silver/diagnose_fact_partition_maturity.py
+          description: "Mede lag entre ingestion_date e file_modified_at nas 13 facts para decidir regra de partição fechada"
+
     pipeline_diario_hardened:
       name: "[${bundle.target}] Varejinho — Gate C1 Pipeline Diário Hardened"
       max_concurrent_runs: 1
