@@ -769,6 +769,68 @@ resources:
             notebook_path: ${workspace.file_path}/pipeline/silver/seed_fact_watermark.py
           description: "Semeia 13 watermarks a partir do maior ingestion_date já comprovadamente materializado na Silver"
 
+    facts_incremental_fixture:
+      name: "[${bundle.target}] Varejinho — Gate D4 Facts Incremental Fixture"
+      max_concurrent_runs: 1
+      parameters:
+        - name: catalog
+          default: ${var.catalog}
+        - name: bundle_files_path
+          default: ${workspace.file_path}
+        - name: control_root
+          default: ${var.control_root}
+      tasks:
+        - task_key: prepare_fact_incremental_fixture
+          notebook_task:
+            notebook_path: ${workspace.file_path}/pipeline/silver/prepare_fact_incremental_fixture.py
+          description: "Cria Bronze/Silver/control sandbox de pedido com D1 baseline e D2/D3 pendentes"
+
+        - task_key: apply_fact_incremental_fixture
+          depends_on:
+            - task_key: prepare_fact_incremental_fixture
+          notebook_task:
+            notebook_path: ${workspace.file_path}/pipeline/silver/incremental_facts.py
+            base_parameters:
+              entity: pedido
+              bronze_table: ${var.catalog}.control._d4_pedido_bronze
+              silver_table: ${var.catalog}.silver._d4_pedido
+              control_table: ${var.catalog}.control._d4_fact_watermark
+              quarantine_table: ${var.catalog}.silver._d4_quarantine_pedido
+              quarantine_history_table: ${var.catalog}.silver._d4_quarantine_history_pedido
+              control_root: ${var.control_root}/d4
+          description: "Executa o runtime incremental genérico sobre dois snapshots pendentes em sandbox"
+
+        - task_key: validate_fact_incremental_fixture
+          depends_on:
+            - task_key: apply_fact_incremental_fixture
+          notebook_task:
+            notebook_path: ${workspace.file_path}/pipeline/silver/validate_incremental_facts.py
+            base_parameters:
+              entity: pedido
+              bronze_table: ${var.catalog}.control._d4_pedido_bronze
+              silver_table: ${var.catalog}.silver._d4_pedido
+              control_table: ${var.catalog}.control._d4_fact_watermark
+              bundle_files_path: ${workspace.file_path}
+          description: "Compara sandbox incremental com full rebuild esperado até candidate"
+
+        - task_key: commit_fact_incremental_fixture_watermark
+          depends_on:
+            - task_key: validate_fact_incremental_fixture
+          notebook_task:
+            notebook_path: ${workspace.file_path}/pipeline/silver/commit_fact_watermark.py
+            base_parameters:
+              entity: pedido
+              bronze_table: ${var.catalog}.control._d4_pedido_bronze
+              control_table: ${var.catalog}.control._d4_fact_watermark
+          description: "Promove watermark sandbox somente após equivalência full vs incremental"
+
+        - task_key: verify_fact_incremental_fixture
+          depends_on:
+            - task_key: commit_fact_incremental_fixture_watermark
+          notebook_task:
+            notebook_path: ${workspace.file_path}/pipeline/silver/verify_fact_incremental_fixture.py
+          description: "Prova update + insert + no-delete + quarantine + watermark e limpa sandbox"
+
     pipeline_diario_hardened:
       name: "[${bundle.target}] Varejinho — Gate C1 Pipeline Diário Hardened"
       max_concurrent_runs: 1
