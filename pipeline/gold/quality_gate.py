@@ -18,6 +18,150 @@ def check(nome, passou, detalhe=""):
     resultados.append(f"{status} {nome} {detalhe}")
 
 
+def check_temporal_mapping(
+    nome,
+    gold_df,
+    gold_fact_key,
+    gold_sk_col,
+    source_df,
+    source_fact_key,
+    source_natural_key,
+    source_event_col,
+    dim_name,
+    dim_natural_key,
+    dim_sk_col,
+    allow_null_natural_key=False,
+):
+    """Valida se a FK da Gold coincide exatamente com o join temporal esperado."""
+    src = (
+        source_df.select(
+            F.col(source_fact_key).alias("_fact_key"),
+            F.col(source_natural_key).alias("_natural_key"),
+            F.col(source_event_col).cast("timestamp").alias("_event_ts"),
+        )
+    )
+
+    invalid_event = src.filter(F.col("_event_ts").isNull()).count()
+    check(
+        f"{nome} — data temporal válida",
+        invalid_event == 0,
+        f"({invalid_event} data(s) nula(s)/inválida(s))",
+    )
+
+    dim = spark.table(f"{CATALOG}.gold.{dim_name}").select(
+        F.col(dim_natural_key).alias("_dim_key"),
+        F.col(dim_sk_col).alias("_expected_sk"),
+        "valid_from",
+        "valid_to",
+    )
+
+    joined = (
+        src.alias("s")
+        .join(
+            dim.alias("d"),
+            (F.col("s._natural_key") == F.col("d._dim_key"))
+            & (F.col("s._event_ts") >= F.col("d.valid_from"))
+            & (
+                F.col("d.valid_to").isNull()
+                | (F.col("s._event_ts") < F.col("d.valid_to"))
+            ),
+            "left",
+        )
+        .select(
+            F.col("s._fact_key").alias("_fact_key"),
+            F.col("s._natural_key").alias("_natural_key"),
+            F.col("s._event_ts").alias("_event_ts"),
+            F.col("d._expected_sk").alias("_expected_sk"),
+        )
+    )
+
+    multi = (
+        joined.groupBy("_fact_key")
+        .agg(F.count("_expected_sk").alias("_matches"))
+        .filter(F.col("_matches") > 1)
+        .count()
+    )
+    check(
+        f"{nome} — sem overlap temporal",
+        multi == 0,
+        f"({multi} fato(s) com múltiplas versões)",
+    )
+
+    expected = (
+        joined.groupBy("_fact_key")
+        .agg(F.first("_expected_sk", ignorenulls=True).alias("_expected_sk"))
+    )
+
+    actual = gold_df.select(
+        F.col(gold_fact_key).alias("_fact_key"),
+        F.col(gold_sk_col).alias("_actual_sk"),
+    )
+
+    comparison = actual.join(expected, on="_fact_key", how="left")
+    mismatch = comparison.filter(
+        ~F.col("_actual_sk").eqNullSafe(F.col("_expected_sk"))
+    ).count()
+    expected_nulls = comparison.filter(F.col("_expected_sk").isNull()).count()
+
+    check(
+        f"{nome} — FK temporal exata",
+        mismatch == 0,
+        f"({mismatch} divergência(s); {expected_nulls} SK(s) esperadas como NULL)",
+    )
+
+    first_boundary = (
+        dim.groupBy("_dim_key")
+        .agg(F.min("valid_from").alias("_first_valid_from"))
+    )
+
+    coverage = src.join(
+        first_boundary,
+        src["_natural_key"] == first_boundary["_dim_key"],
+        "left",
+    )
+
+    invalid_null_key = (
+        0
+        if allow_null_natural_key
+        else coverage.filter(F.col("_natural_key").isNull()).count()
+    )
+    missing_dimension = coverage.filter(
+        F.col("_natural_key").isNotNull()
+        & F.col("_first_valid_from").isNull()
+    ).count()
+
+    expected_with_source = (
+        src.join(expected, on="_fact_key", how="left")
+        .join(
+            first_boundary,
+            src["_natural_key"] == first_boundary["_dim_key"],
+            "left",
+        )
+    )
+
+    unexpected_unresolved = expected_with_source.filter(
+        F.col("_expected_sk").isNull()
+        & F.col("_natural_key").isNotNull()
+        & (
+            F.col("_first_valid_from").isNull()
+            | F.col("_event_ts").isNull()
+            | (F.col("_event_ts") >= F.col("_first_valid_from"))
+        )
+    ).count()
+
+    check(
+        f"{nome} — unresolved temporal explicado",
+        invalid_null_key == 0
+        and missing_dimension == 0
+        and unexpected_unresolved == 0,
+        (
+            f"(chave nula não permitida={invalid_null_key}; "
+            f"sem dimensão={missing_dimension}; "
+            f"gap/outro={unexpected_unresolved})"
+        ),
+    )
+
+
 # ── fato_vendas ──────────────────────────────────────────────
 df = spark.table(f"{CATALOG}.gold.fato_vendas")
 dupes = df.groupBy("sk_venda").count().filter("count > 1").count()
@@ -43,11 +187,29 @@ df = spark.table(f"{CATALOG}.gold.fato_compras")
 dupes = df.groupBy("sk_compra").count().filter("count > 1").count()
 check("fato_compras — SK única", dupes == 0, f"({dupes} duplicatas)")
 
-nulls_prod = df.filter("sk_produto IS NULL").count()
-check("fato_compras — join dim_produto", nulls_prod == 0, f"({nulls_prod} sem produto)")
-
-nulls_forn = df.filter("sk_fornecedor IS NULL").count()
-check("fato_compras — join dim_fornecedor", nulls_forn == 0, f"({nulls_forn} sem fornecedor)")
+pedidoitem = spark.table(f"{CATALOG}.silver.pedidoitem").alias("pi")
+pedido = spark.table(f"{CATALOG}.silver.pedido").alias("pe")
+compras_src = (
+    pedidoitem.join(pedido, F.col("pi.id_pedido") == F.col("pe.id"), "inner")
+    .select(
+        F.col("pi.id").alias("id_pedidoitem"),
+        F.col("pi.id_produto").alias("id_produto"),
+        F.col("pe.id_fornecedor").alias("id_fornecedor"),
+        F.col("pe.datacompra").alias("datacompra"),
+    )
+)
+check_temporal_mapping(
+    "fato_compras → dim_produto",
+    df, "id_pedidoitem", "sk_produto",
+    compras_src, "id_pedidoitem", "id_produto", "datacompra",
+    "dim_produto", "id_produto", "sk_produto",
+)
+check_temporal_mapping(
+    "fato_compras → dim_fornecedor",
+    df, "id_pedidoitem", "sk_fornecedor",
+    compras_src, "id_pedidoitem", "id_fornecedor", "datacompra",
+    "dim_fornecedor", "id_fornecedor", "sk_fornecedor",
+)
 
 silver = spark.table(f"{CATALOG}.silver.pedidoitem").count()
 gold   = df.count()
@@ -87,8 +249,22 @@ df = spark.table(f"{CATALOG}.gold.fato_promocoes")
 dupes = df.groupBy("sk_promocao").count().filter("count > 1").count()
 check("fato_promocoes — SK única", dupes == 0, f"({dupes} duplicatas)")
 
-nulls = df.filter("sk_produto IS NULL").count()
-check("fato_promocoes — join dim_produto", nulls == 0, f"({nulls} sem produto)")
+promocaoitem = spark.table(f"{CATALOG}.silver.promocaoitem").alias("pi")
+promocao = spark.table(f"{CATALOG}.silver.promocao").alias("pr")
+promocoes_src = (
+    promocaoitem.join(promocao, F.col("pi.id_promocao") == F.col("pr.id"), "inner")
+    .select(
+        F.col("pi.id").alias("id_promocaoitem"),
+        F.col("pi.id_produto").alias("id_produto"),
+        F.col("pr.datainicio").alias("datainicio"),
+    )
+)
+check_temporal_mapping(
+    "fato_promocoes → dim_produto",
+    df, "id_promocaoitem", "sk_produto",
+    promocoes_src, "id_promocaoitem", "id_produto", "datainicio",
+    "dim_produto", "id_produto", "sk_produto",
+)
 
 silver = spark.table(f"{CATALOG}.silver.promocaoitem").count()
 gold   = df.count()
@@ -113,8 +289,26 @@ df = spark.table(f"{CATALOG}.gold.fato_contas_pagar")
 dupes = df.groupBy("sk_parcela").count().filter("count > 1").count()
 check("fato_contas_pagar — SK única", dupes == 0, f"({dupes} duplicatas)")
 
-nulls = df.filter("sk_fornecedor IS NULL").count()
-check("fato_contas_pagar — join dim_fornecedor", nulls == 0, f"({nulls} sem fornecedor)")
+parcela = spark.table(f"{CATALOG}.silver.pagarfornecedorparcela").alias("pp")
+pagarfornecedor = spark.table(f"{CATALOG}.silver.pagarfornecedor").alias("pf")
+contas_src = (
+    parcela.join(
+        pagarfornecedor,
+        F.col("pp.id_pagarfornecedor") == F.col("pf.id"),
+        "inner",
+    )
+    .select(
+        F.col("pp.id").alias("id_parcela"),
+        F.col("pf.id_fornecedor").alias("id_fornecedor"),
+        F.col("pf.dataemissao").alias("dataemissao"),
+    )
+)
+check_temporal_mapping(
+    "fato_contas_pagar → dim_fornecedor",
+    df, "id_parcela", "sk_fornecedor",
+    contas_src, "id_parcela", "id_fornecedor", "dataemissao",
+    "dim_fornecedor", "id_fornecedor", "sk_fornecedor",
+)
 
 silver = spark.table(f"{CATALOG}.silver.pagarfornecedorparcela").count()
 gold   = df.count()
@@ -125,6 +319,22 @@ check("fato_contas_pagar — volumetria", gold >= silver * 0.99,
 df = spark.table(f"{CATALOG}.gold.fato_outras_despesas")
 dupes = df.groupBy("sk_despesa").count().filter("count > 1").count()
 check("fato_outras_despesas — SK única", dupes == 0, f"({dupes} duplicatas)")
+
+outras_src = (
+    spark.table(f"{CATALOG}.silver.pagaroutrasdespesas")
+    .select(
+        F.col("id").alias("id_despesa"),
+        "id_fornecedor",
+        "dataemissao",
+    )
+)
+check_temporal_mapping(
+    "fato_outras_despesas → dim_fornecedor",
+    df, "id_despesa", "sk_fornecedor",
+    outras_src, "id_despesa", "id_fornecedor", "dataemissao",
+    "dim_fornecedor", "id_fornecedor", "sk_fornecedor",
+    allow_null_natural_key=True,
+)
 
 silver = spark.table(f"{CATALOG}.silver.pagaroutrasdespesas").count()
 gold   = df.count()
