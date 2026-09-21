@@ -49,14 +49,14 @@ def casts(df, cfg):
             df = df.withColumn(col, F.regexp_replace(F.col(col), ",", ".").cast("decimal(14,3)"))
     for col in cfg.get("try_decimais", []):
         if col in df.columns:
-            df = df.withColumn(col, F.expr(f"try_cast(replace(\`{col}\`, ',', '.') as decimal(14,3))"))
+            df = df.withColumn(col, F.expr(f"try_cast(replace(`{col}`, ',', '.') as decimal(14,3))"))
     if cfg["data"] and cfg["data"] in df.columns:
         df = (df.withColumn(cfg["data"], F.to_timestamp(F.col(cfg["data"]), "yyyy/MM/dd HH:mm:ss.SSS"))
                 .withColumn("ano", F.year(cfg["data"]))
                 .withColumn("mes", F.month(cfg["data"])))
     for col in cfg.get("datas_extras", []):
         if col in df.columns:
-            df = df.withColumn(col, F.expr(f"try_to_timestamp(\`{col}\`, 'yyyy/MM/dd HH:mm:ss.SSS')"))
+            df = df.withColumn(col, F.expr(f"try_to_timestamp(`{col}`, 'yyyy/MM/dd HH:mm:ss.SSS')"))
     return df
 
 
