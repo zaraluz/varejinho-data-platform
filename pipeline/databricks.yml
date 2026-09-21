@@ -1307,6 +1307,399 @@ resources:
             notebook_path: ${workspace.file_path}/pipeline/silver/verify_fact_maturity_fixture.py
           description: "Prova que D3 aberto não entrou na Silver e limpa sandbox"
 
+    facts_maturity_repair:
+      name: "[${bundle.target}] Varejinho — Gate D6B Real Fact Maturity Repair"
+      max_concurrent_runs: 1
+      parameters:
+        - name: catalog
+          default: ${var.catalog}
+        - name: bundle_files_path
+          default: ${workspace.file_path}
+        - name: bronze_source_catalog
+          default: ${var.bronze_source_catalog}
+      tasks:
+        - task_key: repair_notaentrada
+          notebook_task:
+            notebook_path: ${workspace.file_path}/pipeline/silver/repair_fact_maturity_baseline.py
+            base_parameters:
+              entity: notaentrada
+              repair_from: "2026-09-18"
+          description: "Repara notaentrada usando somente snapshots D18..mature_cutoff e remove dados acima do cutoff"
+
+        - task_key: validate_repair_notaentrada
+          depends_on:
+            - task_key: repair_notaentrada
+          notebook_task:
+            notebook_path: ${workspace.file_path}/pipeline/silver/validate_fact_maturity_repair.py
+            base_parameters:
+              entity: notaentrada
+              repair_from: "2026-09-18"
+          description: "Valida chaves/payload do repair de notaentrada preservando extras históricos"
+
+        - task_key: commit_repair_notaentrada
+          depends_on:
+            - task_key: validate_repair_notaentrada
+          notebook_task:
+            notebook_path: ${workspace.file_path}/pipeline/silver/commit_fact_maturity_repair.py
+            base_parameters:
+              entity: notaentrada
+          description: "Corrige watermark de notaentrada para o mature_cutoff somente após validação"
+
+        - task_key: repair_notaentradaitem
+          depends_on:
+            - task_key: commit_repair_notaentrada
+          notebook_task:
+            notebook_path: ${workspace.file_path}/pipeline/silver/repair_fact_maturity_baseline.py
+            base_parameters:
+              entity: notaentradaitem
+              repair_from: "2026-09-18"
+          description: "Repara notaentradaitem usando somente snapshots D18..mature_cutoff e remove dados acima do cutoff"
+
+        - task_key: validate_repair_notaentradaitem
+          depends_on:
+            - task_key: repair_notaentradaitem
+          notebook_task:
+            notebook_path: ${workspace.file_path}/pipeline/silver/validate_fact_maturity_repair.py
+            base_parameters:
+              entity: notaentradaitem
+              repair_from: "2026-09-18"
+          description: "Valida chaves/payload do repair de notaentradaitem preservando extras históricos"
+
+        - task_key: commit_repair_notaentradaitem
+          depends_on:
+            - task_key: validate_repair_notaentradaitem
+          notebook_task:
+            notebook_path: ${workspace.file_path}/pipeline/silver/commit_fact_maturity_repair.py
+            base_parameters:
+              entity: notaentradaitem
+          description: "Corrige watermark de notaentradaitem para o mature_cutoff somente após validação"
+
+        - task_key: repair_perda
+          depends_on:
+            - task_key: commit_repair_notaentradaitem
+          notebook_task:
+            notebook_path: ${workspace.file_path}/pipeline/silver/repair_fact_maturity_baseline.py
+            base_parameters:
+              entity: perda
+              repair_from: "2026-09-18"
+          description: "Repara perda usando somente snapshots D18..mature_cutoff e remove dados acima do cutoff"
+
+        - task_key: validate_repair_perda
+          depends_on:
+            - task_key: repair_perda
+          notebook_task:
+            notebook_path: ${workspace.file_path}/pipeline/silver/validate_fact_maturity_repair.py
+            base_parameters:
+              entity: perda
+              repair_from: "2026-09-18"
+          description: "Valida chaves/payload do repair de perda preservando extras históricos"
+
+        - task_key: commit_repair_perda
+          depends_on:
+            - task_key: validate_repair_perda
+          notebook_task:
+            notebook_path: ${workspace.file_path}/pipeline/silver/commit_fact_maturity_repair.py
+            base_parameters:
+              entity: perda
+          description: "Corrige watermark de perda para o mature_cutoff somente após validação"
+
+        - task_key: repair_logestoque
+          depends_on:
+            - task_key: commit_repair_perda
+          notebook_task:
+            notebook_path: ${workspace.file_path}/pipeline/silver/repair_fact_maturity_baseline.py
+            base_parameters:
+              entity: logestoque
+              repair_from: "2026-09-18"
+          description: "Repara logestoque usando somente snapshots D18..mature_cutoff e remove dados acima do cutoff"
+
+        - task_key: validate_repair_logestoque
+          depends_on:
+            - task_key: repair_logestoque
+          notebook_task:
+            notebook_path: ${workspace.file_path}/pipeline/silver/validate_fact_maturity_repair.py
+            base_parameters:
+              entity: logestoque
+              repair_from: "2026-09-18"
+          description: "Valida chaves/payload do repair de logestoque preservando extras históricos"
+
+        - task_key: commit_repair_logestoque
+          depends_on:
+            - task_key: validate_repair_logestoque
+          notebook_task:
+            notebook_path: ${workspace.file_path}/pipeline/silver/commit_fact_maturity_repair.py
+            base_parameters:
+              entity: logestoque
+          description: "Corrige watermark de logestoque para o mature_cutoff somente após validação"
+
+        - task_key: repair_promocao
+          depends_on:
+            - task_key: commit_repair_logestoque
+          notebook_task:
+            notebook_path: ${workspace.file_path}/pipeline/silver/repair_fact_maturity_baseline.py
+            base_parameters:
+              entity: promocao
+              repair_from: "2026-09-18"
+          description: "Repara promocao usando somente snapshots D18..mature_cutoff e remove dados acima do cutoff"
+
+        - task_key: validate_repair_promocao
+          depends_on:
+            - task_key: repair_promocao
+          notebook_task:
+            notebook_path: ${workspace.file_path}/pipeline/silver/validate_fact_maturity_repair.py
+            base_parameters:
+              entity: promocao
+              repair_from: "2026-09-18"
+          description: "Valida chaves/payload do repair de promocao preservando extras históricos"
+
+        - task_key: commit_repair_promocao
+          depends_on:
+            - task_key: validate_repair_promocao
+          notebook_task:
+            notebook_path: ${workspace.file_path}/pipeline/silver/commit_fact_maturity_repair.py
+            base_parameters:
+              entity: promocao
+          description: "Corrige watermark de promocao para o mature_cutoff somente após validação"
+
+        - task_key: repair_promocaoitem
+          depends_on:
+            - task_key: commit_repair_promocao
+          notebook_task:
+            notebook_path: ${workspace.file_path}/pipeline/silver/repair_fact_maturity_baseline.py
+            base_parameters:
+              entity: promocaoitem
+              repair_from: "2026-09-18"
+          description: "Repara promocaoitem usando somente snapshots D18..mature_cutoff e remove dados acima do cutoff"
+
+        - task_key: validate_repair_promocaoitem
+          depends_on:
+            - task_key: repair_promocaoitem
+          notebook_task:
+            notebook_path: ${workspace.file_path}/pipeline/silver/validate_fact_maturity_repair.py
+            base_parameters:
+              entity: promocaoitem
+              repair_from: "2026-09-18"
+          description: "Valida chaves/payload do repair de promocaoitem preservando extras históricos"
+
+        - task_key: commit_repair_promocaoitem
+          depends_on:
+            - task_key: validate_repair_promocaoitem
+          notebook_task:
+            notebook_path: ${workspace.file_path}/pipeline/silver/commit_fact_maturity_repair.py
+            base_parameters:
+              entity: promocaoitem
+          description: "Corrige watermark de promocaoitem para o mature_cutoff somente após validação"
+
+        - task_key: repair_pedido
+          depends_on:
+            - task_key: commit_repair_promocaoitem
+          notebook_task:
+            notebook_path: ${workspace.file_path}/pipeline/silver/repair_fact_maturity_baseline.py
+            base_parameters:
+              entity: pedido
+              repair_from: "2026-09-18"
+          description: "Repara pedido usando somente snapshots D18..mature_cutoff e remove dados acima do cutoff"
+
+        - task_key: validate_repair_pedido
+          depends_on:
+            - task_key: repair_pedido
+          notebook_task:
+            notebook_path: ${workspace.file_path}/pipeline/silver/validate_fact_maturity_repair.py
+            base_parameters:
+              entity: pedido
+              repair_from: "2026-09-18"
+          description: "Valida chaves/payload do repair de pedido preservando extras históricos"
+
+        - task_key: commit_repair_pedido
+          depends_on:
+            - task_key: validate_repair_pedido
+          notebook_task:
+            notebook_path: ${workspace.file_path}/pipeline/silver/commit_fact_maturity_repair.py
+            base_parameters:
+              entity: pedido
+          description: "Corrige watermark de pedido para o mature_cutoff somente após validação"
+
+        - task_key: repair_pedidoitem
+          depends_on:
+            - task_key: commit_repair_pedido
+          notebook_task:
+            notebook_path: ${workspace.file_path}/pipeline/silver/repair_fact_maturity_baseline.py
+            base_parameters:
+              entity: pedidoitem
+              repair_from: "2026-09-18"
+          description: "Repara pedidoitem usando somente snapshots D18..mature_cutoff e remove dados acima do cutoff"
+
+        - task_key: validate_repair_pedidoitem
+          depends_on:
+            - task_key: repair_pedidoitem
+          notebook_task:
+            notebook_path: ${workspace.file_path}/pipeline/silver/validate_fact_maturity_repair.py
+            base_parameters:
+              entity: pedidoitem
+              repair_from: "2026-09-18"
+          description: "Valida chaves/payload do repair de pedidoitem preservando extras históricos"
+
+        - task_key: commit_repair_pedidoitem
+          depends_on:
+            - task_key: validate_repair_pedidoitem
+          notebook_task:
+            notebook_path: ${workspace.file_path}/pipeline/silver/commit_fact_maturity_repair.py
+            base_parameters:
+              entity: pedidoitem
+          description: "Corrige watermark de pedidoitem para o mature_cutoff somente após validação"
+
+        - task_key: repair_oferta
+          depends_on:
+            - task_key: commit_repair_pedidoitem
+          notebook_task:
+            notebook_path: ${workspace.file_path}/pipeline/silver/repair_fact_maturity_baseline.py
+            base_parameters:
+              entity: oferta
+              repair_from: "2026-09-18"
+          description: "Repara oferta usando somente snapshots D18..mature_cutoff e remove dados acima do cutoff"
+
+        - task_key: validate_repair_oferta
+          depends_on:
+            - task_key: repair_oferta
+          notebook_task:
+            notebook_path: ${workspace.file_path}/pipeline/silver/validate_fact_maturity_repair.py
+            base_parameters:
+              entity: oferta
+              repair_from: "2026-09-18"
+          description: "Valida chaves/payload do repair de oferta preservando extras históricos"
+
+        - task_key: commit_repair_oferta
+          depends_on:
+            - task_key: validate_repair_oferta
+          notebook_task:
+            notebook_path: ${workspace.file_path}/pipeline/silver/commit_fact_maturity_repair.py
+            base_parameters:
+              entity: oferta
+          description: "Corrige watermark de oferta para o mature_cutoff somente após validação"
+
+        - task_key: repair_pagarfornecedor
+          depends_on:
+            - task_key: commit_repair_oferta
+          notebook_task:
+            notebook_path: ${workspace.file_path}/pipeline/silver/repair_fact_maturity_baseline.py
+            base_parameters:
+              entity: pagarfornecedor
+              repair_from: "2026-09-18"
+          description: "Repara pagarfornecedor usando somente snapshots D18..mature_cutoff e remove dados acima do cutoff"
+
+        - task_key: validate_repair_pagarfornecedor
+          depends_on:
+            - task_key: repair_pagarfornecedor
+          notebook_task:
+            notebook_path: ${workspace.file_path}/pipeline/silver/validate_fact_maturity_repair.py
+            base_parameters:
+              entity: pagarfornecedor
+              repair_from: "2026-09-18"
+          description: "Valida chaves/payload do repair de pagarfornecedor preservando extras históricos"
+
+        - task_key: commit_repair_pagarfornecedor
+          depends_on:
+            - task_key: validate_repair_pagarfornecedor
+          notebook_task:
+            notebook_path: ${workspace.file_path}/pipeline/silver/commit_fact_maturity_repair.py
+            base_parameters:
+              entity: pagarfornecedor
+          description: "Corrige watermark de pagarfornecedor para o mature_cutoff somente após validação"
+
+        - task_key: repair_pagarfornecedorparcela
+          depends_on:
+            - task_key: commit_repair_pagarfornecedor
+          notebook_task:
+            notebook_path: ${workspace.file_path}/pipeline/silver/repair_fact_maturity_baseline.py
+            base_parameters:
+              entity: pagarfornecedorparcela
+              repair_from: "2026-09-18"
+          description: "Repara pagarfornecedorparcela usando somente snapshots D18..mature_cutoff e remove dados acima do cutoff"
+
+        - task_key: validate_repair_pagarfornecedorparcela
+          depends_on:
+            - task_key: repair_pagarfornecedorparcela
+          notebook_task:
+            notebook_path: ${workspace.file_path}/pipeline/silver/validate_fact_maturity_repair.py
+            base_parameters:
+              entity: pagarfornecedorparcela
+              repair_from: "2026-09-18"
+          description: "Valida chaves/payload do repair de pagarfornecedorparcela preservando extras históricos"
+
+        - task_key: commit_repair_pagarfornecedorparcela
+          depends_on:
+            - task_key: validate_repair_pagarfornecedorparcela
+          notebook_task:
+            notebook_path: ${workspace.file_path}/pipeline/silver/commit_fact_maturity_repair.py
+            base_parameters:
+              entity: pagarfornecedorparcela
+          description: "Corrige watermark de pagarfornecedorparcela para o mature_cutoff somente após validação"
+
+        - task_key: repair_pagaroutrasdespesas
+          depends_on:
+            - task_key: commit_repair_pagarfornecedorparcela
+          notebook_task:
+            notebook_path: ${workspace.file_path}/pipeline/silver/repair_fact_maturity_baseline.py
+            base_parameters:
+              entity: pagaroutrasdespesas
+              repair_from: "2026-09-18"
+          description: "Repara pagaroutrasdespesas usando somente snapshots D18..mature_cutoff e remove dados acima do cutoff"
+
+        - task_key: validate_repair_pagaroutrasdespesas
+          depends_on:
+            - task_key: repair_pagaroutrasdespesas
+          notebook_task:
+            notebook_path: ${workspace.file_path}/pipeline/silver/validate_fact_maturity_repair.py
+            base_parameters:
+              entity: pagaroutrasdespesas
+              repair_from: "2026-09-18"
+          description: "Valida chaves/payload do repair de pagaroutrasdespesas preservando extras históricos"
+
+        - task_key: commit_repair_pagaroutrasdespesas
+          depends_on:
+            - task_key: validate_repair_pagaroutrasdespesas
+          notebook_task:
+            notebook_path: ${workspace.file_path}/pipeline/silver/commit_fact_maturity_repair.py
+            base_parameters:
+              entity: pagaroutrasdespesas
+          description: "Corrige watermark de pagaroutrasdespesas para o mature_cutoff somente após validação"
+
+        - task_key: repair_pagaroutrasdespesasimposto
+          depends_on:
+            - task_key: commit_repair_pagaroutrasdespesas
+          notebook_task:
+            notebook_path: ${workspace.file_path}/pipeline/silver/repair_fact_maturity_baseline.py
+            base_parameters:
+              entity: pagaroutrasdespesasimposto
+              repair_from: "2026-09-18"
+          description: "Repara pagaroutrasdespesasimposto usando somente snapshots D18..mature_cutoff e remove dados acima do cutoff"
+
+        - task_key: validate_repair_pagaroutrasdespesasimposto
+          depends_on:
+            - task_key: repair_pagaroutrasdespesasimposto
+          notebook_task:
+            notebook_path: ${workspace.file_path}/pipeline/silver/validate_fact_maturity_repair.py
+            base_parameters:
+              entity: pagaroutrasdespesasimposto
+              repair_from: "2026-09-18"
+          description: "Valida chaves/payload do repair de pagaroutrasdespesasimposto preservando extras históricos"
+
+        - task_key: commit_repair_pagaroutrasdespesasimposto
+          depends_on:
+            - task_key: validate_repair_pagaroutrasdespesasimposto
+          notebook_task:
+            notebook_path: ${workspace.file_path}/pipeline/silver/commit_fact_maturity_repair.py
+            base_parameters:
+              entity: pagaroutrasdespesasimposto
+          description: "Corrige watermark de pagaroutrasdespesasimposto para o mature_cutoff somente após validação"
+
+        - task_key: verify_fact_maturity_repair
+          depends_on:
+            - task_key: commit_repair_pagaroutrasdespesasimposto
+          notebook_task:
+            notebook_path: ${workspace.file_path}/pipeline/silver/verify_fact_maturity_repair.py
+          description: "Confirma 13/13 COMMITTED no mature_cutoff e zero linhas acima dele"
+
     pipeline_diario_hardened:
       name: "[${bundle.target}] Varejinho — Gate C1 Pipeline Diário Hardened"
       max_concurrent_runs: 1
