@@ -1,7 +1,7 @@
 -- pipeline/gold/fato_compras.sql
 -- Grão: 1 linha por item de pedido de compra
 -- SK: MD5(id_pedidoitem || id_loja)
--- Join com dim_produto via id_produto (sem SCD2 temporal — pedido não tem data de venda)
+-- Joins temporais com produto e fornecedor pela data da compra
 -- Partição: ano/mes da data de compra do pedido
 
 CREATE OR REPLACE TABLE varejinho.gold.fato_compras
@@ -51,12 +51,14 @@ FROM varejinho.silver.pedidoitem pi
 JOIN varejinho.silver.pedido pe
     ON pi.id_pedido = pe.id
 
--- Join com dim_produto — versão atual (pedido não tem data de referência confiável para SCD2)
+-- Join temporal com dim_produto — versão vigente na data da compra
 LEFT JOIN varejinho.gold.dim_produto p
-    ON  pi.id_produto = p.id_produto
-    AND p.is_current  = true
+    ON  pi.id_produto   = p.id_produto
+    AND pe.datacompra  >= p.valid_from
+    AND (p.valid_to IS NULL OR pe.datacompra < p.valid_to)
 
--- Join com dim_fornecedor — versão atual
+-- Join temporal com dim_fornecedor — identidade vigente na data da compra
 LEFT JOIN varejinho.gold.dim_fornecedor f
     ON  pe.id_fornecedor = f.id_fornecedor
-    AND f.is_current     = true
+    AND pe.datacompra   >= f.valid_from
+    AND (f.valid_to IS NULL OR pe.datacompra < f.valid_to)
