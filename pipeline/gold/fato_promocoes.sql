@@ -1,7 +1,7 @@
 -- pipeline/gold/fato_promocoes.sql
 -- Grão: 1 linha por produto em promoção
 -- SK: MD5(id_promocaoitem || id_loja)
--- Join com dim_produto — versão atual (promoção é prospectiva, não histórica)
+-- Join temporal com dim_produto pela data de início da promoção
 -- Partição: ano/mes da data de início da promoção
 -- Full load na Silver — inclui promoções futuras
 
@@ -47,7 +47,8 @@ FROM varejinho.silver.promocaoitem pi
 JOIN varejinho.silver.promocao pr
     ON pi.id_promocao = pr.id
 
--- Join com dim_produto — versão atual
+-- Join temporal com dim_produto — versão vigente no início da promoção
 LEFT JOIN varejinho.gold.dim_produto p
-    ON  pi.id_produto = p.id_produto
-    AND p.is_current  = true
+    ON  pi.id_produto  = p.id_produto
+    AND pr.datainicio >= p.valid_from
+    AND (p.valid_to IS NULL OR pr.datainicio < p.valid_to)
