@@ -1700,6 +1700,22 @@ resources:
             notebook_path: ${workspace.file_path}/pipeline/silver/verify_fact_maturity_repair.py
           description: "Confirma 13/13 COMMITTED no mature_cutoff e zero linhas acima dele"
 
+    sales_incremental_profile:
+      name: "[${bundle.target}] Varejinho — Gate D7A Venda Incrementality Profile"
+      max_concurrent_runs: 1
+      parameters:
+        - name: catalog
+          default: ${var.catalog}
+        - name: bronze_source_catalog
+          default: ${var.bronze_source_catalog}
+        - name: bundle_files_path
+          default: ${workspace.file_path}
+      tasks:
+        - task_key: profile_sales_incrementality
+          notebook_task:
+            notebook_path: ${workspace.file_path}/pipeline/silver/profile_sales_incrementality.py
+          description: "Diagnóstico read-only de grão, D+1, mature cutoff e contaminação da Silver venda"
+
     pipeline_diario_hardened:
       name: "[${bundle.target}] Varejinho — Gate C1 Pipeline Diário Hardened"
       max_concurrent_runs: 1
