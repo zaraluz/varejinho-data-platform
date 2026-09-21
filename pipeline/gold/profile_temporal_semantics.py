@@ -81,11 +81,8 @@ def temporal_profile(
             (F.col("f._id") == F.col(f"d.{dim_natural_key}"))
             & (F.col("f._event_ts") >= F.col("d.valid_from"))
             & (
-                F.col("f._event_ts")
-                < F.coalesce(
-                    F.col("d.valid_to"),
-                    F.lit("2999-12-31 00:00:00").cast("timestamp"),
-                )
+                F.col("d.valid_to").isNull()
+                | (F.col("f._event_ts") < F.col("d.valid_to"))
             ),
             how="left",
         )
@@ -133,17 +130,16 @@ def temporal_profile(
         dim.groupBy(dim_natural_key)
         .agg(
             F.min("valid_from").alias("_first_valid_from"),
+            F.max("valid_to").alias("_last_closed_valid_to"),
             F.max(
-                F.coalesce(
-                    F.col("valid_to"),
-                    F.lit("2999-12-31 00:00:00").cast("timestamp"),
-                )
-            ).alias("_last_valid_to"),
+                F.when(F.col("valid_to").isNull(), F.lit(1)).otherwise(F.lit(0))
+            ).alias("_has_open_ended"),
         )
         .select(
             F.col(dim_natural_key).alias("_id"),
             "_first_valid_from",
-            "_last_valid_to",
+            "_last_closed_valid_to",
+            "_has_open_ended",
         )
     )
 
@@ -163,15 +159,21 @@ def temporal_profile(
     ).count()
 
     after_last = temporal_gaps.filter(
-        F.col("_last_valid_to").isNotNull()
-        & (F.col("_event_ts") >= F.col("_last_valid_to"))
+        (F.col("_has_open_ended") == 0)
+        & F.col("_last_closed_valid_to").isNotNull()
+        & (F.col("_event_ts") >= F.col("_last_closed_valid_to"))
     ).count()
 
     internal_gap = temporal_gaps.filter(
         F.col("_first_valid_from").isNotNull()
-        & F.col("_last_valid_to").isNotNull()
         & (F.col("_event_ts") >= F.col("_first_valid_from"))
-        & (F.col("_event_ts") < F.col("_last_valid_to"))
+        & (
+            (F.col("_has_open_ended") == 1)
+            | (
+                F.col("_last_closed_valid_to").isNotNull()
+                & (F.col("_event_ts") < F.col("_last_closed_valid_to"))
+            )
+        )
     ).count()
     changed = comparison.filter(
         F.col("_sk_current").isNotNull()
