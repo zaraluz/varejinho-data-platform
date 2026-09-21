@@ -130,12 +130,20 @@ def check_temporal_mapping(
         & F.col("_first_valid_from").isNull()
     ).count()
 
+    source_expected = src.join(expected, on="_fact_key", how="left").alias("se")
+    boundary = first_boundary.alias("b")
     expected_with_source = (
-        src.join(expected, on="_fact_key", how="left")
-        .join(
-            first_boundary,
-            src["_natural_key"] == first_boundary["_dim_key"],
+        source_expected.join(
+            boundary,
+            F.col("se._natural_key") == F.col("b._dim_key"),
             "left",
+        )
+        .select(
+            F.col("se._fact_key").alias("_fact_key"),
+            F.col("se._natural_key").alias("_natural_key"),
+            F.col("se._event_ts").alias("_event_ts"),
+            F.col("se._expected_sk").alias("_expected_sk"),
+            F.col("b._first_valid_from").alias("_first_valid_from"),
         )
     )
 
