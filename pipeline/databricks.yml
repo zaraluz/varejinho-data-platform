@@ -1938,7 +1938,14 @@ resources:
         - name: bundle_files_path
           default: ${workspace.file_path}
       tasks:
+        - task_key: guard_dev_only
+          notebook_task:
+            notebook_path: ${workspace.file_path}/pipeline/gold/guard_temporal_apply.py
+          description: "Bloqueia execução fora de catálogo *_dev durante hardening"
+
         - task_key: rebuild_gold_dimensions
+          depends_on:
+            - task_key: guard_dev_only
           notebook_task:
             notebook_path: ${workspace.file_path}/pipeline/gold/build_dimensions.py
           description: "Recria somente as dimensões Gold a partir da Silver SCD2 já aprovada"
