@@ -1716,6 +1716,43 @@ resources:
             notebook_path: ${workspace.file_path}/pipeline/silver/profile_sales_incrementality.py
           description: "Diagnóstico read-only de grão, D+1, mature cutoff e contaminação da Silver venda"
 
+    sales_maturity_repair:
+      name: "[${bundle.target}] Varejinho — Gate D7B Venda Maturity Repair"
+      max_concurrent_runs: 1
+      parameters:
+        - name: catalog
+          default: ${var.catalog}
+        - name: bronze_source_catalog
+          default: ${var.bronze_source_catalog}
+        - name: bundle_files_path
+          default: ${workspace.file_path}
+      tasks:
+        - task_key: repair_sales_maturity
+          notebook_task:
+            notebook_path: ${workspace.file_path}/pipeline/silver/repair_sales_maturity_baseline.py
+          description: "Restaura ids sobrescritos pela partição aberta para a última versão madura"
+
+        - task_key: validate_sales_maturity_repair
+          depends_on:
+            - task_key: repair_sales_maturity
+          notebook_task:
+            notebook_path: ${workspace.file_path}/pipeline/silver/validate_sales_maturity_repair.py
+          description: "Exige equivalência exata entre Silver venda e full rebuild até mature_cutoff"
+
+        - task_key: commit_sales_maturity_repair
+          depends_on:
+            - task_key: validate_sales_maturity_repair
+          notebook_task:
+            notebook_path: ${workspace.file_path}/pipeline/silver/commit_sales_maturity_repair.py
+          description: "Semeia/promove watermark de venda somente após validação"
+
+        - task_key: verify_sales_maturity_repair
+          depends_on:
+            - task_key: commit_sales_maturity_repair
+          notebook_task:
+            notebook_path: ${workspace.file_path}/pipeline/silver/verify_sales_maturity_repair.py
+          description: "Confirma venda COMMITTED no mature_cutoff e zero open rows"
+
     pipeline_diario_hardened:
       name: "[${bundle.target}] Varejinho — Gate C1 Pipeline Diário Hardened"
       max_concurrent_runs: 1
