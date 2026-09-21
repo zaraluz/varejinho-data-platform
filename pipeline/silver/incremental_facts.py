@@ -6,6 +6,7 @@
 from pyspark.sql import functions as F
 from pyspark.sql.window import Window
 from delta.tables import DeltaTable
+from datetime import date
 import json
 import yaml
 
@@ -25,6 +26,8 @@ BUNDLE_FILES_PATH = job_param(
 )
 CONTROL_ROOT = job_param("control_root", "s3://varejinho-lake/_control/dev")
 CONTROL_TABLE = job_param("control_table", f"{CATALOG}.control.fact_watermark")
+BRONZE_SOURCE_CATALOG = job_param("bronze_source_catalog", "varejinho")
+MATURE_CUTOFF_OVERRIDE = job_param("mature_cutoff_override", "")
 BRONZE_OVERRIDE = job_param("bronze_table", "")
 SILVER_OVERRIDE = job_param("silver_table", "")
 QUARANTINE_OVERRIDE = job_param("quarantine_table", "")
@@ -183,6 +186,46 @@ def paths_for(entity):
     )
 
 
+def latest_mature_partition(entity):
+    """
+    Retorna a maior ingestion_date cuja partição já fechou fisicamente.
+
+    Regra aprovada no Gate D5C:
+    uma partição D só é madura quando TODOS os arquivos atualmente visíveis
+    para D têm file_modification_time em data posterior a D (D+1 ou mais).
+
+    O override existe apenas para fixtures/sandboxes, que não possuem _metadata
+    da external table real.
+    """
+    if MATURE_CUTOFF_OVERRIDE:
+        cutoff = date.fromisoformat(MATURE_CUTOFF_OVERRIDE)
+        print(f"[{entity}] mature_cutoff_override={cutoff}")
+        return cutoff
+
+    if BRONZE_OVERRIDE:
+        raise Exception(
+            f"{entity}: bronze_table override exige mature_cutoff_override no sandbox"
+        )
+
+    source = f"{BRONZE_SOURCE_CATALOG}.bronze.{entity}"
+    maturity = spark.sql(f"""
+        SELECT
+            ingestion_date,
+            MIN(to_date(_metadata.file_modification_time)) AS min_modified_date
+        FROM {source}
+        GROUP BY ingestion_date
+    """)
+
+    row = (
+        maturity
+        .filter(F.col("min_modified_date") > F.col("ingestion_date"))
+        .agg(F.max("ingestion_date").alias("mature_cutoff"))
+        .collect()[0]
+    )
+
+    return row["mature_cutoff"]
+
+
 def processar(entity):
     cfg = CONFIG[entity]
     keys = cfg["chave"]
@@ -229,10 +272,24 @@ def processar(entity):
     if bronze_max is None:
         raise Exception(f"{entity}: Bronze sem ingestion_date válido")
 
+    mature_cutoff = latest_mature_partition(entity)
+    if mature_cutoff is None:
+        print(
+            f"✅ {entity}: nenhuma partição madura disponível. "
+            f"Bronze max visível={bronze_max}; no-op."
+        )
+        return
+
+    if committed is not None and committed > mature_cutoff:
+        raise Exception(
+            f"{entity}: committed={committed} está à frente do mature_cutoff="
+            f"{mature_cutoff}. Requer recuperação controlada antes de continuar."
+        )
+
     pending = spark.table(bronze)
     if committed is not None:
         pending = pending.filter(F.col("ingestion_date") > F.lit(committed))
-    pending = pending.filter(F.col("ingestion_date") <= F.lit(bronze_max))
+    pending = pending.filter(F.col("ingestion_date") <= F.lit(mature_cutoff))
 
     snapshots = [
         r["ingestion_date"]
@@ -243,8 +300,11 @@ def processar(entity):
     ]
 
     print(f"\n=== FACT INCREMENTAL — {entity} ===")
-    print(f"Committed: {committed} | Bronze max: {bronze_max}")
-    print(f"Pending snapshots: {snapshots}")
+    print(
+        f"Committed: {committed} | Mature cutoff: {mature_cutoff} "
+        f"| Bronze max visível: {bronze_max}"
+    )
+    print(f"Pending mature snapshots: {snapshots}")
 
     if not snapshots:
         print(f"✅ {entity}: nenhum snapshot pendente; no-op.")
@@ -304,7 +364,7 @@ def processar(entity):
 
     spark.sql(f"""
         UPDATE {CONTROL_TABLE}
-        SET candidate_snapshot = DATE '{bronze_max}',
+        SET candidate_snapshot = DATE '{mature_cutoff}',
             status = 'PENDING_VALIDATION',
             updated_at = current_timestamp()
         WHERE entity = '{entity}'
@@ -318,7 +378,7 @@ def processar(entity):
         .collect()[0]
     )
     if (
-        final_state["candidate_snapshot"] != bronze_max
+        final_state["candidate_snapshot"] != mature_cutoff
         or final_state["status"] != "PENDING_VALIDATION"
     ):
         raise Exception(f"{entity}: falha ao registrar candidate_snapshot")
@@ -328,7 +388,7 @@ def processar(entity):
         f"| source final={source.count():,} | quarantine={invalid_count:,}"
     )
     print(
-        f"✅ candidate={bronze_max}; committed continua={committed}; "
+        f"✅ candidate={mature_cutoff}; committed continua={committed}; "
         "status=PENDING_VALIDATION"
     )
     print("ℹ️ Ausência de chave em snapshot não executa DELETE.")
