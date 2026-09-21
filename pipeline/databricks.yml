@@ -831,6 +831,373 @@ resources:
             notebook_path: ${workspace.file_path}/pipeline/silver/verify_fact_incremental_fixture.py
           description: "Prova update + insert + no-delete + quarantine + watermark e limpa sandbox"
 
+    facts_incremental_real:
+      name: "[${bundle.target}] Varejinho — Gate D5 Real Facts Incremental Catch-up"
+      max_concurrent_runs: 1
+      parameters:
+        - name: catalog
+          default: ${var.catalog}
+        - name: bundle_files_path
+          default: ${workspace.file_path}
+        - name: control_root
+          default: ${var.control_root}
+      tasks:
+        - task_key: apply_notaentrada
+          notebook_task:
+            notebook_path: ${workspace.file_path}/pipeline/silver/incremental_facts.py
+            base_parameters:
+              entity: notaentrada
+          description: "Aplica snapshots pendentes de notaentrada sem avançar watermark"
+
+        - task_key: validate_notaentrada
+          depends_on:
+            - task_key: apply_notaentrada
+          notebook_task:
+            notebook_path: ${workspace.file_path}/pipeline/silver/validate_incremental_facts.py
+            base_parameters:
+              entity: notaentrada
+          description: "Prova incremental == full rebuild para notaentrada"
+
+        - task_key: commit_notaentrada
+          depends_on:
+            - task_key: validate_notaentrada
+          notebook_task:
+            notebook_path: ${workspace.file_path}/pipeline/silver/commit_fact_watermark.py
+            base_parameters:
+              entity: notaentrada
+          description: "Promove watermark de notaentrada somente após equivalência"
+
+        - task_key: apply_notaentradaitem
+          depends_on:
+            - task_key: commit_notaentrada
+          notebook_task:
+            notebook_path: ${workspace.file_path}/pipeline/silver/incremental_facts.py
+            base_parameters:
+              entity: notaentradaitem
+          description: "Aplica snapshots pendentes de notaentradaitem sem avançar watermark"
+
+        - task_key: validate_notaentradaitem
+          depends_on:
+            - task_key: apply_notaentradaitem
+          notebook_task:
+            notebook_path: ${workspace.file_path}/pipeline/silver/validate_incremental_facts.py
+            base_parameters:
+              entity: notaentradaitem
+          description: "Prova incremental == full rebuild para notaentradaitem"
+
+        - task_key: commit_notaentradaitem
+          depends_on:
+            - task_key: validate_notaentradaitem
+          notebook_task:
+            notebook_path: ${workspace.file_path}/pipeline/silver/commit_fact_watermark.py
+            base_parameters:
+              entity: notaentradaitem
+          description: "Promove watermark de notaentradaitem somente após equivalência"
+
+        - task_key: apply_perda
+          depends_on:
+            - task_key: commit_notaentradaitem
+          notebook_task:
+            notebook_path: ${workspace.file_path}/pipeline/silver/incremental_facts.py
+            base_parameters:
+              entity: perda
+          description: "Aplica snapshots pendentes de perda sem avançar watermark"
+
+        - task_key: validate_perda
+          depends_on:
+            - task_key: apply_perda
+          notebook_task:
+            notebook_path: ${workspace.file_path}/pipeline/silver/validate_incremental_facts.py
+            base_parameters:
+              entity: perda
+          description: "Prova incremental == full rebuild para perda"
+
+        - task_key: commit_perda
+          depends_on:
+            - task_key: validate_perda
+          notebook_task:
+            notebook_path: ${workspace.file_path}/pipeline/silver/commit_fact_watermark.py
+            base_parameters:
+              entity: perda
+          description: "Promove watermark de perda somente após equivalência"
+
+        - task_key: apply_logestoque
+          depends_on:
+            - task_key: commit_perda
+          notebook_task:
+            notebook_path: ${workspace.file_path}/pipeline/silver/incremental_facts.py
+            base_parameters:
+              entity: logestoque
+          description: "Aplica snapshots pendentes de logestoque sem avançar watermark"
+
+        - task_key: validate_logestoque
+          depends_on:
+            - task_key: apply_logestoque
+          notebook_task:
+            notebook_path: ${workspace.file_path}/pipeline/silver/validate_incremental_facts.py
+            base_parameters:
+              entity: logestoque
+          description: "Prova incremental == full rebuild para logestoque"
+
+        - task_key: commit_logestoque
+          depends_on:
+            - task_key: validate_logestoque
+          notebook_task:
+            notebook_path: ${workspace.file_path}/pipeline/silver/commit_fact_watermark.py
+            base_parameters:
+              entity: logestoque
+          description: "Promove watermark de logestoque somente após equivalência"
+
+        - task_key: apply_promocao
+          depends_on:
+            - task_key: commit_logestoque
+          notebook_task:
+            notebook_path: ${workspace.file_path}/pipeline/silver/incremental_facts.py
+            base_parameters:
+              entity: promocao
+          description: "Aplica snapshots pendentes de promocao sem avançar watermark"
+
+        - task_key: validate_promocao
+          depends_on:
+            - task_key: apply_promocao
+          notebook_task:
+            notebook_path: ${workspace.file_path}/pipeline/silver/validate_incremental_facts.py
+            base_parameters:
+              entity: promocao
+          description: "Prova incremental == full rebuild para promocao"
+
+        - task_key: commit_promocao
+          depends_on:
+            - task_key: validate_promocao
+          notebook_task:
+            notebook_path: ${workspace.file_path}/pipeline/silver/commit_fact_watermark.py
+            base_parameters:
+              entity: promocao
+          description: "Promove watermark de promocao somente após equivalência"
+
+        - task_key: apply_promocaoitem
+          depends_on:
+            - task_key: commit_promocao
+          notebook_task:
+            notebook_path: ${workspace.file_path}/pipeline/silver/incremental_facts.py
+            base_parameters:
+              entity: promocaoitem
+          description: "Aplica snapshots pendentes de promocaoitem sem avançar watermark"
+
+        - task_key: validate_promocaoitem
+          depends_on:
+            - task_key: apply_promocaoitem
+          notebook_task:
+            notebook_path: ${workspace.file_path}/pipeline/silver/validate_incremental_facts.py
+            base_parameters:
+              entity: promocaoitem
+          description: "Prova incremental == full rebuild para promocaoitem"
+
+        - task_key: commit_promocaoitem
+          depends_on:
+            - task_key: validate_promocaoitem
+          notebook_task:
+            notebook_path: ${workspace.file_path}/pipeline/silver/commit_fact_watermark.py
+            base_parameters:
+              entity: promocaoitem
+          description: "Promove watermark de promocaoitem somente após equivalência"
+
+        - task_key: apply_pedido
+          depends_on:
+            - task_key: commit_promocaoitem
+          notebook_task:
+            notebook_path: ${workspace.file_path}/pipeline/silver/incremental_facts.py
+            base_parameters:
+              entity: pedido
+          description: "Aplica snapshots pendentes de pedido sem avançar watermark"
+
+        - task_key: validate_pedido
+          depends_on:
+            - task_key: apply_pedido
+          notebook_task:
+            notebook_path: ${workspace.file_path}/pipeline/silver/validate_incremental_facts.py
+            base_parameters:
+              entity: pedido
+          description: "Prova incremental == full rebuild para pedido"
+
+        - task_key: commit_pedido
+          depends_on:
+            - task_key: validate_pedido
+          notebook_task:
+            notebook_path: ${workspace.file_path}/pipeline/silver/commit_fact_watermark.py
+            base_parameters:
+              entity: pedido
+          description: "Promove watermark de pedido somente após equivalência"
+
+        - task_key: apply_pedidoitem
+          depends_on:
+            - task_key: commit_pedido
+          notebook_task:
+            notebook_path: ${workspace.file_path}/pipeline/silver/incremental_facts.py
+            base_parameters:
+              entity: pedidoitem
+          description: "Aplica snapshots pendentes de pedidoitem sem avançar watermark"
+
+        - task_key: validate_pedidoitem
+          depends_on:
+            - task_key: apply_pedidoitem
+          notebook_task:
+            notebook_path: ${workspace.file_path}/pipeline/silver/validate_incremental_facts.py
+            base_parameters:
+              entity: pedidoitem
+          description: "Prova incremental == full rebuild para pedidoitem"
+
+        - task_key: commit_pedidoitem
+          depends_on:
+            - task_key: validate_pedidoitem
+          notebook_task:
+            notebook_path: ${workspace.file_path}/pipeline/silver/commit_fact_watermark.py
+            base_parameters:
+              entity: pedidoitem
+          description: "Promove watermark de pedidoitem somente após equivalência"
+
+        - task_key: apply_oferta
+          depends_on:
+            - task_key: commit_pedidoitem
+          notebook_task:
+            notebook_path: ${workspace.file_path}/pipeline/silver/incremental_facts.py
+            base_parameters:
+              entity: oferta
+          description: "Aplica snapshots pendentes de oferta sem avançar watermark"
+
+        - task_key: validate_oferta
+          depends_on:
+            - task_key: apply_oferta
+          notebook_task:
+            notebook_path: ${workspace.file_path}/pipeline/silver/validate_incremental_facts.py
+            base_parameters:
+              entity: oferta
+          description: "Prova incremental == full rebuild para oferta"
+
+        - task_key: commit_oferta
+          depends_on:
+            - task_key: validate_oferta
+          notebook_task:
+            notebook_path: ${workspace.file_path}/pipeline/silver/commit_fact_watermark.py
+            base_parameters:
+              entity: oferta
+          description: "Promove watermark de oferta somente após equivalência"
+
+        - task_key: apply_pagarfornecedor
+          depends_on:
+            - task_key: commit_oferta
+          notebook_task:
+            notebook_path: ${workspace.file_path}/pipeline/silver/incremental_facts.py
+            base_parameters:
+              entity: pagarfornecedor
+          description: "Aplica snapshots pendentes de pagarfornecedor sem avançar watermark"
+
+        - task_key: validate_pagarfornecedor
+          depends_on:
+            - task_key: apply_pagarfornecedor
+          notebook_task:
+            notebook_path: ${workspace.file_path}/pipeline/silver/validate_incremental_facts.py
+            base_parameters:
+              entity: pagarfornecedor
+          description: "Prova incremental == full rebuild para pagarfornecedor"
+
+        - task_key: commit_pagarfornecedor
+          depends_on:
+            - task_key: validate_pagarfornecedor
+          notebook_task:
+            notebook_path: ${workspace.file_path}/pipeline/silver/commit_fact_watermark.py
+            base_parameters:
+              entity: pagarfornecedor
+          description: "Promove watermark de pagarfornecedor somente após equivalência"
+
+        - task_key: apply_pagarfornecedorparcela
+          depends_on:
+            - task_key: commit_pagarfornecedor
+          notebook_task:
+            notebook_path: ${workspace.file_path}/pipeline/silver/incremental_facts.py
+            base_parameters:
+              entity: pagarfornecedorparcela
+          description: "Aplica snapshots pendentes de pagarfornecedorparcela sem avançar watermark"
+
+        - task_key: validate_pagarfornecedorparcela
+          depends_on:
+            - task_key: apply_pagarfornecedorparcela
+          notebook_task:
+            notebook_path: ${workspace.file_path}/pipeline/silver/validate_incremental_facts.py
+            base_parameters:
+              entity: pagarfornecedorparcela
+          description: "Prova incremental == full rebuild para pagarfornecedorparcela"
+
+        - task_key: commit_pagarfornecedorparcela
+          depends_on:
+            - task_key: validate_pagarfornecedorparcela
+          notebook_task:
+            notebook_path: ${workspace.file_path}/pipeline/silver/commit_fact_watermark.py
+            base_parameters:
+              entity: pagarfornecedorparcela
+          description: "Promove watermark de pagarfornecedorparcela somente após equivalência"
+
+        - task_key: apply_pagaroutrasdespesas
+          depends_on:
+            - task_key: commit_pagarfornecedorparcela
+          notebook_task:
+            notebook_path: ${workspace.file_path}/pipeline/silver/incremental_facts.py
+            base_parameters:
+              entity: pagaroutrasdespesas
+          description: "Aplica snapshots pendentes de pagaroutrasdespesas sem avançar watermark"
+
+        - task_key: validate_pagaroutrasdespesas
+          depends_on:
+            - task_key: apply_pagaroutrasdespesas
+          notebook_task:
+            notebook_path: ${workspace.file_path}/pipeline/silver/validate_incremental_facts.py
+            base_parameters:
+              entity: pagaroutrasdespesas
+          description: "Prova incremental == full rebuild para pagaroutrasdespesas"
+
+        - task_key: commit_pagaroutrasdespesas
+          depends_on:
+            - task_key: validate_pagaroutrasdespesas
+          notebook_task:
+            notebook_path: ${workspace.file_path}/pipeline/silver/commit_fact_watermark.py
+            base_parameters:
+              entity: pagaroutrasdespesas
+          description: "Promove watermark de pagaroutrasdespesas somente após equivalência"
+
+        - task_key: apply_pagaroutrasdespesasimposto
+          depends_on:
+            - task_key: commit_pagaroutrasdespesas
+          notebook_task:
+            notebook_path: ${workspace.file_path}/pipeline/silver/incremental_facts.py
+            base_parameters:
+              entity: pagaroutrasdespesasimposto
+          description: "Aplica snapshots pendentes de pagaroutrasdespesasimposto sem avançar watermark"
+
+        - task_key: validate_pagaroutrasdespesasimposto
+          depends_on:
+            - task_key: apply_pagaroutrasdespesasimposto
+          notebook_task:
+            notebook_path: ${workspace.file_path}/pipeline/silver/validate_incremental_facts.py
+            base_parameters:
+              entity: pagaroutrasdespesasimposto
+          description: "Prova incremental == full rebuild para pagaroutrasdespesasimposto"
+
+        - task_key: commit_pagaroutrasdespesasimposto
+          depends_on:
+            - task_key: validate_pagaroutrasdespesasimposto
+          notebook_task:
+            notebook_path: ${workspace.file_path}/pipeline/silver/commit_fact_watermark.py
+            base_parameters:
+              entity: pagaroutrasdespesasimposto
+          description: "Promove watermark de pagaroutrasdespesasimposto somente após equivalência"
+
+        - task_key: verify_real_fact_catchup
+          depends_on:
+            - task_key: commit_pagaroutrasdespesasimposto
+          notebook_task:
+            notebook_path: ${workspace.file_path}/pipeline/silver/verify_fact_incremental_real.py
+          description: "Confirma 13/13 watermarks COMMITTED no Bronze max e zero snapshots pendentes"
+
     pipeline_diario_hardened:
       name: "[${bundle.target}] Varejinho — Gate C1 Pipeline Diário Hardened"
       max_concurrent_runs: 1
