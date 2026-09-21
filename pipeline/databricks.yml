@@ -1964,6 +1964,20 @@ resources:
             notebook_path: ${workspace.file_path}/pipeline/gold/quality_gate.py
           description: "Valida SKs temporais, overlaps, unresolved explicados e invariantes Gold"
 
+    contract_profile:
+      name: "[${bundle.target}] Varejinho — Gate C1 Data Contracts Profile"
+      max_concurrent_runs: 1
+      parameters:
+        - name: catalog
+          default: ${var.catalog}
+        - name: bundle_files_path
+          default: ${workspace.file_path}
+      tasks:
+        - task_key: profile_contracts
+          notebook_task:
+            notebook_path: ${workspace.file_path}/pipeline/silver/profile_contracts.py
+          description: "Inventário/lint read-only dos contratos Silver, criticidade, schema real, hardcodes e gaps de enforcement"
+
     pipeline_diario:
       name: "[${bundle.target}] Varejinho — Pipeline Diário"
       # Schedules ficam PAUSED durante hardening; o Release Gate decide quando liberar prod.
