@@ -210,6 +210,15 @@ def processar(entity):
     candidate = state["candidate_snapshot"]
     status = state["status"]
 
+    # Resume seguro: se o APPLY anterior terminou e deixou candidate pendente,
+    # não reaplicamos o MERGE. A próxima task deve reexecutar a validação.
+    if status == "PENDING_VALIDATION" and candidate is not None:
+        print(
+            f"ℹ️ {entity}: candidate={candidate} já está PENDING_VALIDATION. "
+            "APPLY anterior preservado; seguindo para retry da validação sem novo MERGE."
+        )
+        return
+
     if status != "COMMITTED" or candidate is not None:
         raise Exception(
             f"{entity}: estado inicial inválido: committed={committed}, "
