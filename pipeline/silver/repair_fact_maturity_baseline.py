@@ -29,6 +29,7 @@ BUNDLE_FILES_PATH = job_param(
 )
 BRONZE_SOURCE_CATALOG = job_param("bronze_source_catalog", "varejinho")
 CONTROL_TABLE = job_param("control_table", f"{CATALOG}.control.fact_watermark")
+REPAIR_FROM = job_param("repair_from", "2026-09-18")
 AUDIT_TABLE = f"{CATALOG}.control.fact_maturity_repair_audit"
 
 if not CATALOG.endswith("_dev"):
@@ -188,6 +189,7 @@ spark.sql(f"""
         watermark_committed_before DATE,
         watermark_candidate_before DATE,
         watermark_status_before STRING,
+        repair_from DATE,
         mature_cutoff DATE,
         rows_before BIGINT,
         future_rows_before BIGINT
@@ -203,14 +205,17 @@ spark.sql(f"""
         {f"DATE '{committed_before}'" if committed_before else "NULL"},
         {f"DATE '{candidate_before}'" if candidate_before else "NULL"},
         '{status_before}',
+        DATE '{REPAIR_FROM}',
         DATE '{mature_cutoff}',
         {rows_before},
         {future_before}
     )
 """)
 
-raw = spark.table(bronze).filter(
-    F.col("ingestion_date") <= F.lit(mature_cutoff)
+raw = (
+    spark.table(bronze)
+    .filter(F.col("ingestion_date") >= F.lit(REPAIR_FROM))
+    .filter(F.col("ingestion_date") <= F.lit(mature_cutoff))
 )
 valid, invalid = filtrar_contrato(ENTITY, aplicar_casts(raw, cfg))
 
@@ -253,11 +258,11 @@ future_after = (
 
 print(f"\n=== D6B REPAIR APPLY — {ENTITY} ===")
 print(f"state before: committed={committed_before} candidate={candidate_before} status={status_before}")
-print(f"mature_cutoff: {mature_cutoff}")
+print(f"repair window: {REPAIR_FROM} -> {mature_cutoff}")
 print(f"silver version before: {silver_version_before}")
 print(f"rows: before={rows_before:,} after={rows_after:,}")
 print(f"future rows: before={future_before:,} after={future_after:,}")
-print(f"expected mature keys: {expected.count():,}")
+print(f"expected repair-window keys: {expected.count():,}")
 print(f"invalid mature rows ignored by Silver contract: {invalid.count():,}")
 print("✅ Mature baseline MERGE aplicado sem deletar histórico observado.")
 print("✅ Linhas acima do mature_cutoff removidas como rollback de partição aberta.")
