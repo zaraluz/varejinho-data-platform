@@ -1,0 +1,57 @@
+version: 1
+
+tiers:
+  critical:
+    contract_required: true
+    enforcement: full
+    description: Fatos financeiros/transacionais cujo erro altera métricas de negócio ou integridade operacional.
+    entities:
+      - venda
+      - notaentrada
+      - notaentradaitem
+      - pedido
+      - pedidoitem
+      - pagarfornecedor
+      - pagarfornecedorparcela
+      - pagaroutrasdespesas
+      - pagaroutrasdespesasimposto
+
+  high:
+    contract_required: true
+    enforcement: core
+    description: Entidades centrais para joins, histórico, estoque, preço e classificação analítica.
+    entities:
+      - produto
+      - fornecedor
+      - mercadologico
+      - loja
+      - produtofornecedor
+      - curvaabc
+      - logestoque
+      - perda
+      - oferta
+      - promocao
+      - promocaoitem
+
+  standard:
+    contract_required: false
+    enforcement: simplified
+    description: Lookups/domínios estáveis; exigirão checks simplificados, não o mesmo contrato dos fatos críticos.
+    entities:
+      - situacaocadastro
+      - situacaonotaentrada
+      - situacaopagarfornecedorparcela
+      - situacaopagaroutrasdespesas
+      - situacaopedido
+      - tipocurvaabc
+      - tipoembalagem
+      - tipoentrada
+      - tipofornecedor
+      - tipomercadoria
+      - tipomotivoperda
+      - tipomovimentacao
+      - tipooferta
+      - tipopagamento
+      - tipopedido
+      - tipoplanoconta
+      - tipopromocao
