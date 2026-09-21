@@ -798,6 +798,7 @@ resources:
               quarantine_table: ${var.catalog}.silver._d4_quarantine_pedido
               quarantine_history_table: ${var.catalog}.silver._d4_quarantine_history_pedido
               control_root: ${var.control_root}/d4
+              mature_cutoff_override: "2026-09-03"
           description: "Executa o runtime incremental genérico sobre dois snapshots pendentes em sandbox"
 
         - task_key: validate_fact_incremental_fixture
@@ -1243,6 +1244,68 @@ resources:
           notebook_task:
             notebook_path: ${workspace.file_path}/pipeline/silver/diagnose_fact_partition_maturity.py
           description: "Mede lag entre ingestion_date e file_modified_at nas 13 facts para decidir regra de partição fechada"
+
+    facts_maturity_fixture:
+      name: "[${bundle.target}] Varejinho — Gate D6A Mature Partition Fixture"
+      max_concurrent_runs: 1
+      parameters:
+        - name: catalog
+          default: ${var.catalog}
+        - name: bundle_files_path
+          default: ${workspace.file_path}
+        - name: control_root
+          default: ${var.control_root}
+      tasks:
+        - task_key: prepare_fact_maturity_fixture
+          notebook_task:
+            notebook_path: ${workspace.file_path}/pipeline/silver/prepare_fact_maturity_fixture.py
+          description: "Cria D1 committed, D2 madura e D3 aberta em sandbox"
+
+        - task_key: apply_mature_fact_fixture
+          depends_on:
+            - task_key: prepare_fact_maturity_fixture
+          notebook_task:
+            notebook_path: ${workspace.file_path}/pipeline/silver/incremental_facts.py
+            base_parameters:
+              entity: pedido
+              bronze_table: ${var.catalog}.control._d6a_pedido_bronze
+              silver_table: ${var.catalog}.silver._d6a_pedido
+              control_table: ${var.catalog}.control._d6a_fact_watermark
+              quarantine_table: ${var.catalog}.silver._d6a_quarantine_pedido
+              quarantine_history_table: ${var.catalog}.silver._d6a_quarantine_history_pedido
+              mature_cutoff_override: "2026-09-02"
+              control_root: ${var.control_root}/d6a
+          description: "Aplica somente D2; D3 existe na Bronze mas permanece aberta"
+
+        - task_key: validate_mature_fact_fixture
+          depends_on:
+            - task_key: apply_mature_fact_fixture
+          notebook_task:
+            notebook_path: ${workspace.file_path}/pipeline/silver/validate_mature_incremental_facts.py
+            base_parameters:
+              entity: pedido
+              bronze_table: ${var.catalog}.control._d6a_pedido_bronze
+              silver_table: ${var.catalog}.silver._d6a_pedido
+              control_table: ${var.catalog}.control._d6a_fact_watermark
+          description: "Valida o lote maduro sem exigir remoção de histórico"
+
+        - task_key: commit_mature_fact_fixture
+          depends_on:
+            - task_key: validate_mature_fact_fixture
+          notebook_task:
+            notebook_path: ${workspace.file_path}/pipeline/silver/commit_fact_watermark.py
+            base_parameters:
+              entity: pedido
+              bronze_table: ${var.catalog}.control._d6a_pedido_bronze
+              control_table: ${var.catalog}.control._d6a_fact_watermark
+          description: "Promove candidate D2 somente após validação"
+
+        - task_key: verify_fact_maturity_fixture
+          depends_on:
+            - task_key: commit_mature_fact_fixture
+          notebook_task:
+            notebook_path: ${workspace.file_path}/pipeline/silver/verify_fact_maturity_fixture.py
+          description: "Prova que D3 aberto não entrou na Silver e limpa sandbox"
 
     pipeline_diario_hardened:
       name: "[${bundle.target}] Varejinho — Gate C1 Pipeline Diário Hardened"
