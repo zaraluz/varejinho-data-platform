@@ -1919,7 +1919,7 @@ resources:
 
     pipeline_diario:
       name: "[${bundle.target}] Varejinho — Pipeline Diário"
-      # Dev fica PAUSED por padrão. Somente prod é liberado no override acima.
+      # Schedules ficam PAUSED durante hardening; o Release Gate decide quando liberar prod.
       schedule:
         quartz_cron_expression: "0 0 7,13,21 * * ?"
         timezone_id: "America/Fortaleza"
