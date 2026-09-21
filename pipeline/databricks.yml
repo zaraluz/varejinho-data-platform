@@ -39,27 +39,15 @@ targets:
       control_root: s3://varejinho-lake/_control
     resources:
       jobs:
-        gold_temporal_profile:
-      name: "[${bundle.target}] Varejinho — Gate G1 Gold Temporal Profile"
-      max_concurrent_runs: 1
-      parameters:
-        - name: catalog
-          default: ${var.catalog}
-      tasks:
-        - task_key: profile_gold_temporal_semantics
-          notebook_task:
-            notebook_path: ${workspace.file_path}/pipeline/gold/profile_temporal_semantics.py
-          description: "Compara join atual vs temporal nas facts candidatas sem alterar Gold"
-
-    pipeline_diario:
+        pipeline_diario:
           schedule:
-            pause_status: UNPAUSED
+            pause_status: PAUSED
         manutencao_semanal:
           schedule:
-            pause_status: UNPAUSED
+            pause_status: PAUSED
         dbt_tests:
           schedule:
-            pause_status: UNPAUSED
+            pause_status: PAUSED
 
 resources:
   jobs:
@@ -1916,6 +1904,18 @@ resources:
           notebook_task:
             notebook_path: ${workspace.file_path}/pipeline/silver/verify_sales_real_replay.py
           description: "Compara incremental real com expected real e limpa sandbox"
+
+    gold_temporal_profile:
+      name: "[${bundle.target}] Varejinho — Gate G1 Gold Temporal Profile"
+      max_concurrent_runs: 1
+      parameters:
+        - name: catalog
+          default: ${var.catalog}
+      tasks:
+        - task_key: profile_gold_temporal_semantics
+          notebook_task:
+            notebook_path: ${workspace.file_path}/pipeline/gold/profile_temporal_semantics.py
+          description: "Compara join atual vs temporal nas facts candidatas sem alterar Gold"
 
     pipeline_diario:
       name: "[${bundle.target}] Varejinho — Pipeline Diário"
