@@ -83,7 +83,7 @@ def aplicar_casts(df, cfg):
         if col in df.columns:
             df = df.withColumn(
                 col,
-                F.expr(f"try_cast(replace(\`{col}\`, ',', '.') as decimal(14,3))"),
+                F.expr(f"try_cast(replace(`{col}`, ',', '.') as decimal(14,3))"),
             )
 
     if cfg["data"] and cfg["data"] in df.columns:
@@ -101,7 +101,7 @@ def aplicar_casts(df, cfg):
             df = df.withColumn(
                 col,
                 F.expr(
-                    f"try_to_timestamp(\`{col}\`, 'yyyy/MM/dd HH:mm:ss.SSS')"
+                    f"try_to_timestamp(`{col}`, 'yyyy/MM/dd HH:mm:ss.SSS')"
                 ),
             )
     return df
