@@ -1214,6 +1214,22 @@ resources:
               entity: notaentradaitem
           description: "Explica missing/extra keys do D5 e testa evidências de mutabilidade/late write na Bronze raw"
 
+    facts_file_version_diagnostic:
+      name: "[${bundle.target}] Varejinho — Gate D5B Bronze File Versions"
+      max_concurrent_runs: 1
+      parameters:
+        - name: catalog
+          default: ${var.catalog}
+        - name: bronze_source_catalog
+          default: ${var.bronze_source_catalog}
+      tasks:
+        - task_key: diagnose_notaentradaitem_file_versions
+          notebook_task:
+            notebook_path: ${workspace.file_path}/pipeline/silver/diagnose_fact_file_versions.py
+            base_parameters:
+              entity: notaentradaitem
+          description: "Usa _metadata da external table para relacionar ingestion_date com file path/modification time e confirmar mecanismo de mutabilidade"
+
     pipeline_diario_hardened:
       name: "[${bundle.target}] Varejinho — Gate C1 Pipeline Diário Hardened"
       max_concurrent_runs: 1
