@@ -28,42 +28,14 @@ def check(nome, passou, detalhe=""):
 hoje = datetime.now(timezone.utc).date()
 ontem = hoje - timedelta(days=1)
 
-# ── Fatos — venda legacy + facts incrementais por partição madura ─────────
+# ── Fatos incrementais por partição madura ────────────────────────────────
 
-# venda ainda usa o fluxo legado e será hardenizada separadamente.
-try:
-    bronze_venda = spark.table(f"{CATALOG}.bronze.venda")
-    silver_venda = spark.table(f"{CATALOG}.silver.venda")
-
-    bronze_count = bronze_venda.count()
-    silver_count = silver_venda.count()
-    ratio = silver_count / bronze_count if bronze_count > 0 else 0
-
-    check(
-        "venda — volumetria",
-        ratio >= 0.95,
-        f"(Bronze: {bronze_count:,} | Silver: {silver_count:,} | ratio: {ratio:.2%})",
-    )
-
-    ultima = silver_venda.agg(F.max("ingestion_date")).collect()[0][0]
-    if ultima:
-        ultima_date = (
-            ultima
-            if isinstance(ultima, type(hoje))
-            else ultima.date() if hasattr(ultima, "date") else None
-        )
-        if ultima_date:
-            check(
-                "venda — freshness",
-                ultima_date >= ontem,
-                f"(última partição: {ultima_date})",
-            )
-
-except Exception as e:
-    resultados.append(f"❌ venda: {str(e)[:150]}")
-
+# Venda e as 13 facts transacionais/financeiras usam o mesmo invariant diário:
+# watermark único e COMMITTED, candidate limpo, committed == mature_cutoff
+# e nenhuma linha da partição ainda aberta presente na Silver.
 
 INCREMENTAL_FACTS = [
+    "venda",
     "notaentrada",
     "notaentradaitem",
     "perda",
@@ -79,8 +51,8 @@ INCREMENTAL_FACTS = [
     "pagaroutrasdespesasimposto",
 ]
 
-# Para essas 13 tabelas, o invariant diário não é mais Silver/full Bronze ratio.
-# Gate D5C provou que a partição do dia D permanece aberta até D+1.
+# Para essas 14 tabelas, o invariant diário não é Silver/full Bronze ratio.
+# Gates D5C e D7A provaram que a partição do dia D permanece aberta até D+1.
 # O QG agora valida o estado operacional incremental:
 #   - watermark existe e está COMMITTED;
 #   - candidate está limpo;
