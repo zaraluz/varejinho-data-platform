@@ -1929,6 +1929,18 @@ resources:
             notebook_path: ${workspace.file_path}/pipeline/gold/profile_temporal_boundaries.py
           description: "Explica eventos anteriores à primeira versão SCD2 sem alterar Silver/Gold"
 
+    gold_temporal_policy_impact:
+      name: "[${bundle.target}] Varejinho — Gate G3 Temporal Policy Impact"
+      max_concurrent_runs: 1
+      parameters:
+        - name: catalog
+          default: ${var.catalog}
+      tasks:
+        - task_key: profile_temporal_policy_impact
+          notebook_task:
+            notebook_path: ${workspace.file_path}/pipeline/gold/profile_temporal_policy_impact.py
+          description: "Mede impacto de join temporal estrito e unresolved before-first sem alterar Gold"
+
     pipeline_diario:
       name: "[${bundle.target}] Varejinho — Pipeline Diário"
       # Schedules ficam PAUSED durante hardening; o Release Gate decide quando liberar prod.
