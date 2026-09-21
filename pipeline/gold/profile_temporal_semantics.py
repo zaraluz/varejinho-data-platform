@@ -56,12 +56,18 @@ def temporal_profile(
     print(f"\n{'=' * 100}")
     print(f"{label} | event_date={event_date}")
 
+    # Datas candidatas nem sempre foram tipadas na Silver (ex.: pagarfornecedor.dataentrada).
+    # O profiler é read-only e deve medir isso, não quebrar por ANSI cast.
     base = (
         facts
         .select(
             F.col(fact_key).alias("_fact_key"),
             F.col(fact_natural_key).alias("_id"),
-            F.col(event_date).alias("_event_ts"),
+            F.col(event_date).alias("_event_raw"),
+        )
+        .withColumn(
+            "_event_ts",
+            F.expr("try_cast(_event_raw as timestamp)"),
         )
     )
 
@@ -112,9 +118,61 @@ def temporal_profile(
     )
 
     total = comparison.count()
+    raw_null_event = base.filter(F.col("_event_raw").isNull()).count()
+    unparseable_event = base.filter(
+        F.col("_event_raw").isNotNull() & F.col("_event_ts").isNull()
+    ).count()
     null_event = comparison.filter(F.col("_event_ts").isNull()).count()
     null_current = comparison.filter(F.col("_sk_current").isNull()).count()
     null_temporal = comparison.filter(F.col("_sk_temporal").isNull()).count()
+
+    # Classifica por que um evento com chave dimensional conhecida não encontrou
+    # uma versão temporal. Isso separa "join errado" de "histórico SCD2 não cobre
+    # aquela data", que exigem decisões diferentes.
+    coverage = (
+        dim.groupBy(dim_natural_key)
+        .agg(
+            F.min("valid_from").alias("_first_valid_from"),
+            F.max(
+                F.coalesce(
+                    F.col("valid_to"),
+                    F.lit("2999-12-31 00:00:00").cast("timestamp"),
+                )
+            ).alias("_last_valid_to"),
+        )
+        .select(
+            F.col(dim_natural_key).alias("_id"),
+            "_first_valid_from",
+            "_last_valid_to",
+        )
+    )
+
+    temporal_gaps = (
+        comparison
+        .filter(
+            F.col("_event_ts").isNotNull()
+            & F.col("_sk_current").isNotNull()
+            & F.col("_sk_temporal").isNull()
+        )
+        .join(coverage, on="_id", how="left")
+    )
+
+    before_first = temporal_gaps.filter(
+        F.col("_first_valid_from").isNotNull()
+        & (F.col("_event_ts") < F.col("_first_valid_from"))
+    ).count()
+
+    after_last = temporal_gaps.filter(
+        F.col("_last_valid_to").isNotNull()
+        & (F.col("_event_ts") >= F.col("_last_valid_to"))
+    ).count()
+
+    internal_gap = temporal_gaps.filter(
+        F.col("_first_valid_from").isNotNull()
+        & F.col("_last_valid_to").isNotNull()
+        & (F.col("_event_ts") >= F.col("_first_valid_from"))
+        & (F.col("_event_ts") < F.col("_last_valid_to"))
+    ).count()
     changed = comparison.filter(
         F.col("_sk_current").isNotNull()
         & F.col("_sk_temporal").isNotNull()
@@ -124,9 +182,14 @@ def temporal_profile(
     pct = (changed / total * 100) if total else 0
 
     print(f"rows:                         {total:,}")
-    print(f"null event date:              {null_event:,}")
+    print(f"raw null event date:          {raw_null_event:,}")
+    print(f"unparseable event date:       {unparseable_event:,}")
+    print(f"null event timestamp:         {null_event:,}")
     print(f"current join null:            {null_current:,}")
     print(f"temporal join null:           {null_temporal:,}")
+    print(f"  ↳ before first SCD2 version:{before_first:,}")
+    print(f"  ↳ after last SCD2 version:  {after_last:,}")
+    print(f"  ↳ internal SCD2 gap:        {internal_gap:,}")
     print(f"temporal multiple matches:    {temporal_multi:,}")
     print(f"SK current != temporal:       {changed:,} ({pct:.4f}%)")
 
@@ -154,9 +217,14 @@ def temporal_profile(
         "label": label,
         "event_date": event_date,
         "rows": total,
+        "raw_null_event": raw_null_event,
+        "unparseable_event": unparseable_event,
         "null_event": null_event,
         "null_current": null_current,
         "null_temporal": null_temporal,
+        "before_first": before_first,
+        "after_last": after_last,
+        "internal_gap": internal_gap,
         "multi": temporal_multi,
         "changed": changed,
     }
@@ -288,14 +356,16 @@ for dt in ["dataemissao", "dataentrada"]:
 
 print("\n\n=== GATE G1 — TEMPORAL GOLD SUMMARY ===")
 print(
-    "relationship | event_date | rows | null_event | null_current | "
-    "null_temporal | multi | current!=temporal"
+    "relationship | event_date | rows | raw_null | unparseable | null_ts | "
+    "null_current | null_temporal | before_first | after_last | internal_gap | "
+    "multi | current!=temporal"
 )
 for r in results:
     print(
         f"{r['label']} | {r['event_date']} | {r['rows']} | "
-        f"{r['null_event']} | {r['null_current']} | {r['null_temporal']} | "
-        f"{r['multi']} | {r['changed']}"
+        f"{r['raw_null_event']} | {r['unparseable_event']} | {r['null_event']} | "
+        f"{r['null_current']} | {r['null_temporal']} | {r['before_first']} | "
+        f"{r['after_last']} | {r['internal_gap']} | {r['multi']} | {r['changed']}"
     )
 
 bad_multi = [r for r in results if r["multi"] > 0]
