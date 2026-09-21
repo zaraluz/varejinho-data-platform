@@ -1,6 +1,12 @@
 # Immutable Bronze Cutover Design
 
-Status: **approved architecture direction after Gate D5B; runtime migration not yet executed**
+Status: **superseded by Gate D5C for the current pipeline. Kept as an escalation design if partitions are ever observed changing after D+1.**
+
+## Why this design was considered
+
+Gate D5B initially suggested that immutable batch identity might be required. Gate D5C then showed a consistent operational pattern across all 13 facts: current-day partitions are still open, while historical files are finalized no later than D+1. Because no file was observed changing after D+1, the current hardening path uses a closed-partition rule instead of changing Pentaho/S3 naming.
+
+This document remains the fallback architecture if a future gate proves modifications later than D+1.
 
 ## Why this change exists
 
