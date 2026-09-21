@@ -178,6 +178,10 @@ def validar(entity):
     extra = a_keys.join(e_keys, on=keys, how="left_anti").count()
 
     mismatches = None
+    joined = None
+    mismatch_df = None
+    nonkeys = []
+
     if schema_ok and e_dup == 0 and a_dup == 0:
         cols = expected.columns
         nonkeys = [c for c in cols if c not in keys]
@@ -201,7 +205,8 @@ def validar(entity):
                     F.col(f"a.{nonkeys[0]}")
                 ),
             )
-            mismatches = joined.filter(diff_condition).count()
+            mismatch_df = joined.filter(diff_condition)
+            mismatches = mismatch_df.count()
         else:
             mismatches = 0
 
@@ -225,6 +230,80 @@ def validar(entity):
     print(f"RESULT:         {'✅ PASS' if ok else '❌ FAIL'}")
 
     if not ok:
+        print("\n--- DIAGNÓSTICO DA DIVERGÊNCIA ---")
+
+        missing_cols = sorted(set(e_schema) - set(a_schema))
+        extra_cols = sorted(set(a_schema) - set(e_schema))
+        type_mismatches = sorted(
+            [
+                f"{col}: expected={e_schema[col]} actual={a_schema[col]}"
+                for col in set(e_schema) & set(a_schema)
+                if e_schema[col] != a_schema[col]
+            ]
+        )
+        if missing_cols:
+            print(f"Schema — colunas ausentes na Silver: {missing_cols}")
+        if extra_cols:
+            print(f"Schema — colunas extras na Silver: {extra_cols}")
+        if type_mismatches:
+            print(f"Schema — tipos divergentes: {type_mismatches}")
+
+        if missing > 0:
+            print("\nAmostra de chaves esperadas e ausentes na Silver:")
+            (
+                e_keys.join(a_keys, on=keys, how="left_anti")
+                .limit(10)
+                .show(truncate=False)
+            )
+
+        if extra > 0:
+            print("\nAmostra de chaves extras na Silver:")
+            (
+                a_keys.join(e_keys, on=keys, how="left_anti")
+                .limit(10)
+                .show(truncate=False)
+            )
+
+        if mismatch_df is not None and mismatches > 0:
+            print("\nMismatch por coluna:")
+            mismatch_exprs = [
+                F.sum(
+                    F.when(
+                        ~F.col(f"e.{col}").eqNullSafe(F.col(f"a.{col}")),
+                        F.lit(1),
+                    ).otherwise(F.lit(0))
+                ).alias(col)
+                for col in nonkeys
+            ]
+            counts = mismatch_df.agg(*mismatch_exprs).collect()[0].asDict()
+            changed_cols = [
+                (col, count)
+                for col, count in counts.items()
+                if count and count > 0
+            ]
+            changed_cols.sort(key=lambda x: x[1], reverse=True)
+            for col, count in changed_cols:
+                print(f"  {col}: {count:,}")
+
+            sample_cols = [
+                F.col(f"e.{key}").alias(key)
+                for key in keys
+            ]
+            if "ingestion_date" in nonkeys:
+                sample_cols.extend(
+                    [
+                        F.col("e.ingestion_date").alias("expected_ingestion_date"),
+                        F.col("a.ingestion_date").alias("actual_ingestion_date"),
+                    ]
+                )
+
+            print("\nAmostra de chaves com valores divergentes:")
+            mismatch_df.select(*sample_cols).limit(10).show(truncate=False)
+
+        print(
+            "\n⚠️ Watermark NÃO será committed. "
+            "O estado PENDING_VALIDATION foi preservado para diagnóstico/retry."
+        )
         raise Exception(
             f"{entity}: incremental divergiu do full rebuild até {candidate}"
         )
