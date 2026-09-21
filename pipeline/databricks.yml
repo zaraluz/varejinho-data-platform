@@ -1863,6 +1863,8 @@ resources:
           default: ${workspace.file_path}
         - name: control_root
           default: ${var.control_root}
+        - name: bronze_source_catalog
+          default: ${var.bronze_source_catalog}
       tasks:
         - task_key: bronze_quality_gate
           notebook_task:
@@ -1960,19 +1962,363 @@ resources:
             notebook_path: ${workspace.file_path}/pipeline/silver/transform_sales.py
           description: "Processa silver.venda com cast, contrato e schema drift"
 
-        - task_key: silver_facts
+        - task_key: fact_notaentrada_apply
           depends_on:
             - task_key: bronze_quality_gate
           notebook_task:
-            notebook_path: ${workspace.file_path}/pipeline/silver/transform_facts.py
-          description: "Fatos transacionais e financeiros"
+            notebook_path: ${workspace.file_path}/pipeline/silver/incremental_facts.py
+            base_parameters:
+              entity: notaentrada
+          description: "Aplica somente partições maduras de notaentrada; nunca consome o dia ainda aberto"
+
+        - task_key: fact_notaentrada_validate
+          depends_on:
+            - task_key: fact_notaentrada_apply
+          notebook_task:
+            notebook_path: ${workspace.file_path}/pipeline/silver/validate_mature_incremental_facts.py
+            base_parameters:
+              entity: notaentrada
+          description: "Valida o lote incremental maduro de notaentrada antes do watermark"
+
+        - task_key: fact_notaentrada_commit
+          depends_on:
+            - task_key: fact_notaentrada_validate
+          notebook_task:
+            notebook_path: ${workspace.file_path}/pipeline/silver/commit_fact_watermark.py
+            base_parameters:
+              entity: notaentrada
+          description: "Promove watermark de notaentrada somente após validação"
+
+        - task_key: fact_notaentradaitem_apply
+          depends_on:
+            - task_key: fact_notaentrada_commit
+          notebook_task:
+            notebook_path: ${workspace.file_path}/pipeline/silver/incremental_facts.py
+            base_parameters:
+              entity: notaentradaitem
+          description: "Aplica somente partições maduras de notaentradaitem; nunca consome o dia ainda aberto"
+
+        - task_key: fact_notaentradaitem_validate
+          depends_on:
+            - task_key: fact_notaentradaitem_apply
+          notebook_task:
+            notebook_path: ${workspace.file_path}/pipeline/silver/validate_mature_incremental_facts.py
+            base_parameters:
+              entity: notaentradaitem
+          description: "Valida o lote incremental maduro de notaentradaitem antes do watermark"
+
+        - task_key: fact_notaentradaitem_commit
+          depends_on:
+            - task_key: fact_notaentradaitem_validate
+          notebook_task:
+            notebook_path: ${workspace.file_path}/pipeline/silver/commit_fact_watermark.py
+            base_parameters:
+              entity: notaentradaitem
+          description: "Promove watermark de notaentradaitem somente após validação"
+
+        - task_key: fact_perda_apply
+          depends_on:
+            - task_key: fact_notaentradaitem_commit
+          notebook_task:
+            notebook_path: ${workspace.file_path}/pipeline/silver/incremental_facts.py
+            base_parameters:
+              entity: perda
+          description: "Aplica somente partições maduras de perda; nunca consome o dia ainda aberto"
+
+        - task_key: fact_perda_validate
+          depends_on:
+            - task_key: fact_perda_apply
+          notebook_task:
+            notebook_path: ${workspace.file_path}/pipeline/silver/validate_mature_incremental_facts.py
+            base_parameters:
+              entity: perda
+          description: "Valida o lote incremental maduro de perda antes do watermark"
+
+        - task_key: fact_perda_commit
+          depends_on:
+            - task_key: fact_perda_validate
+          notebook_task:
+            notebook_path: ${workspace.file_path}/pipeline/silver/commit_fact_watermark.py
+            base_parameters:
+              entity: perda
+          description: "Promove watermark de perda somente após validação"
+
+        - task_key: fact_logestoque_apply
+          depends_on:
+            - task_key: fact_perda_commit
+          notebook_task:
+            notebook_path: ${workspace.file_path}/pipeline/silver/incremental_facts.py
+            base_parameters:
+              entity: logestoque
+          description: "Aplica somente partições maduras de logestoque; nunca consome o dia ainda aberto"
+
+        - task_key: fact_logestoque_validate
+          depends_on:
+            - task_key: fact_logestoque_apply
+          notebook_task:
+            notebook_path: ${workspace.file_path}/pipeline/silver/validate_mature_incremental_facts.py
+            base_parameters:
+              entity: logestoque
+          description: "Valida o lote incremental maduro de logestoque antes do watermark"
+
+        - task_key: fact_logestoque_commit
+          depends_on:
+            - task_key: fact_logestoque_validate
+          notebook_task:
+            notebook_path: ${workspace.file_path}/pipeline/silver/commit_fact_watermark.py
+            base_parameters:
+              entity: logestoque
+          description: "Promove watermark de logestoque somente após validação"
+
+        - task_key: fact_promocao_apply
+          depends_on:
+            - task_key: fact_logestoque_commit
+          notebook_task:
+            notebook_path: ${workspace.file_path}/pipeline/silver/incremental_facts.py
+            base_parameters:
+              entity: promocao
+          description: "Aplica somente partições maduras de promocao; nunca consome o dia ainda aberto"
+
+        - task_key: fact_promocao_validate
+          depends_on:
+            - task_key: fact_promocao_apply
+          notebook_task:
+            notebook_path: ${workspace.file_path}/pipeline/silver/validate_mature_incremental_facts.py
+            base_parameters:
+              entity: promocao
+          description: "Valida o lote incremental maduro de promocao antes do watermark"
+
+        - task_key: fact_promocao_commit
+          depends_on:
+            - task_key: fact_promocao_validate
+          notebook_task:
+            notebook_path: ${workspace.file_path}/pipeline/silver/commit_fact_watermark.py
+            base_parameters:
+              entity: promocao
+          description: "Promove watermark de promocao somente após validação"
+
+        - task_key: fact_promocaoitem_apply
+          depends_on:
+            - task_key: fact_promocao_commit
+          notebook_task:
+            notebook_path: ${workspace.file_path}/pipeline/silver/incremental_facts.py
+            base_parameters:
+              entity: promocaoitem
+          description: "Aplica somente partições maduras de promocaoitem; nunca consome o dia ainda aberto"
+
+        - task_key: fact_promocaoitem_validate
+          depends_on:
+            - task_key: fact_promocaoitem_apply
+          notebook_task:
+            notebook_path: ${workspace.file_path}/pipeline/silver/validate_mature_incremental_facts.py
+            base_parameters:
+              entity: promocaoitem
+          description: "Valida o lote incremental maduro de promocaoitem antes do watermark"
+
+        - task_key: fact_promocaoitem_commit
+          depends_on:
+            - task_key: fact_promocaoitem_validate
+          notebook_task:
+            notebook_path: ${workspace.file_path}/pipeline/silver/commit_fact_watermark.py
+            base_parameters:
+              entity: promocaoitem
+          description: "Promove watermark de promocaoitem somente após validação"
+
+        - task_key: fact_pedido_apply
+          depends_on:
+            - task_key: fact_promocaoitem_commit
+          notebook_task:
+            notebook_path: ${workspace.file_path}/pipeline/silver/incremental_facts.py
+            base_parameters:
+              entity: pedido
+          description: "Aplica somente partições maduras de pedido; nunca consome o dia ainda aberto"
+
+        - task_key: fact_pedido_validate
+          depends_on:
+            - task_key: fact_pedido_apply
+          notebook_task:
+            notebook_path: ${workspace.file_path}/pipeline/silver/validate_mature_incremental_facts.py
+            base_parameters:
+              entity: pedido
+          description: "Valida o lote incremental maduro de pedido antes do watermark"
+
+        - task_key: fact_pedido_commit
+          depends_on:
+            - task_key: fact_pedido_validate
+          notebook_task:
+            notebook_path: ${workspace.file_path}/pipeline/silver/commit_fact_watermark.py
+            base_parameters:
+              entity: pedido
+          description: "Promove watermark de pedido somente após validação"
+
+        - task_key: fact_pedidoitem_apply
+          depends_on:
+            - task_key: fact_pedido_commit
+          notebook_task:
+            notebook_path: ${workspace.file_path}/pipeline/silver/incremental_facts.py
+            base_parameters:
+              entity: pedidoitem
+          description: "Aplica somente partições maduras de pedidoitem; nunca consome o dia ainda aberto"
+
+        - task_key: fact_pedidoitem_validate
+          depends_on:
+            - task_key: fact_pedidoitem_apply
+          notebook_task:
+            notebook_path: ${workspace.file_path}/pipeline/silver/validate_mature_incremental_facts.py
+            base_parameters:
+              entity: pedidoitem
+          description: "Valida o lote incremental maduro de pedidoitem antes do watermark"
+
+        - task_key: fact_pedidoitem_commit
+          depends_on:
+            - task_key: fact_pedidoitem_validate
+          notebook_task:
+            notebook_path: ${workspace.file_path}/pipeline/silver/commit_fact_watermark.py
+            base_parameters:
+              entity: pedidoitem
+          description: "Promove watermark de pedidoitem somente após validação"
+
+        - task_key: fact_oferta_apply
+          depends_on:
+            - task_key: fact_pedidoitem_commit
+          notebook_task:
+            notebook_path: ${workspace.file_path}/pipeline/silver/incremental_facts.py
+            base_parameters:
+              entity: oferta
+          description: "Aplica somente partições maduras de oferta; nunca consome o dia ainda aberto"
+
+        - task_key: fact_oferta_validate
+          depends_on:
+            - task_key: fact_oferta_apply
+          notebook_task:
+            notebook_path: ${workspace.file_path}/pipeline/silver/validate_mature_incremental_facts.py
+            base_parameters:
+              entity: oferta
+          description: "Valida o lote incremental maduro de oferta antes do watermark"
+
+        - task_key: fact_oferta_commit
+          depends_on:
+            - task_key: fact_oferta_validate
+          notebook_task:
+            notebook_path: ${workspace.file_path}/pipeline/silver/commit_fact_watermark.py
+            base_parameters:
+              entity: oferta
+          description: "Promove watermark de oferta somente após validação"
+
+        - task_key: fact_pagarfornecedor_apply
+          depends_on:
+            - task_key: fact_oferta_commit
+          notebook_task:
+            notebook_path: ${workspace.file_path}/pipeline/silver/incremental_facts.py
+            base_parameters:
+              entity: pagarfornecedor
+          description: "Aplica somente partições maduras de pagarfornecedor; nunca consome o dia ainda aberto"
+
+        - task_key: fact_pagarfornecedor_validate
+          depends_on:
+            - task_key: fact_pagarfornecedor_apply
+          notebook_task:
+            notebook_path: ${workspace.file_path}/pipeline/silver/validate_mature_incremental_facts.py
+            base_parameters:
+              entity: pagarfornecedor
+          description: "Valida o lote incremental maduro de pagarfornecedor antes do watermark"
+
+        - task_key: fact_pagarfornecedor_commit
+          depends_on:
+            - task_key: fact_pagarfornecedor_validate
+          notebook_task:
+            notebook_path: ${workspace.file_path}/pipeline/silver/commit_fact_watermark.py
+            base_parameters:
+              entity: pagarfornecedor
+          description: "Promove watermark de pagarfornecedor somente após validação"
+
+        - task_key: fact_pagarfornecedorparcela_apply
+          depends_on:
+            - task_key: fact_pagarfornecedor_commit
+          notebook_task:
+            notebook_path: ${workspace.file_path}/pipeline/silver/incremental_facts.py
+            base_parameters:
+              entity: pagarfornecedorparcela
+          description: "Aplica somente partições maduras de pagarfornecedorparcela; nunca consome o dia ainda aberto"
+
+        - task_key: fact_pagarfornecedorparcela_validate
+          depends_on:
+            - task_key: fact_pagarfornecedorparcela_apply
+          notebook_task:
+            notebook_path: ${workspace.file_path}/pipeline/silver/validate_mature_incremental_facts.py
+            base_parameters:
+              entity: pagarfornecedorparcela
+          description: "Valida o lote incremental maduro de pagarfornecedorparcela antes do watermark"
+
+        - task_key: fact_pagarfornecedorparcela_commit
+          depends_on:
+            - task_key: fact_pagarfornecedorparcela_validate
+          notebook_task:
+            notebook_path: ${workspace.file_path}/pipeline/silver/commit_fact_watermark.py
+            base_parameters:
+              entity: pagarfornecedorparcela
+          description: "Promove watermark de pagarfornecedorparcela somente após validação"
+
+        - task_key: fact_pagaroutrasdespesas_apply
+          depends_on:
+            - task_key: fact_pagarfornecedorparcela_commit
+          notebook_task:
+            notebook_path: ${workspace.file_path}/pipeline/silver/incremental_facts.py
+            base_parameters:
+              entity: pagaroutrasdespesas
+          description: "Aplica somente partições maduras de pagaroutrasdespesas; nunca consome o dia ainda aberto"
+
+        - task_key: fact_pagaroutrasdespesas_validate
+          depends_on:
+            - task_key: fact_pagaroutrasdespesas_apply
+          notebook_task:
+            notebook_path: ${workspace.file_path}/pipeline/silver/validate_mature_incremental_facts.py
+            base_parameters:
+              entity: pagaroutrasdespesas
+          description: "Valida o lote incremental maduro de pagaroutrasdespesas antes do watermark"
+
+        - task_key: fact_pagaroutrasdespesas_commit
+          depends_on:
+            - task_key: fact_pagaroutrasdespesas_validate
+          notebook_task:
+            notebook_path: ${workspace.file_path}/pipeline/silver/commit_fact_watermark.py
+            base_parameters:
+              entity: pagaroutrasdespesas
+          description: "Promove watermark de pagaroutrasdespesas somente após validação"
+
+        - task_key: fact_pagaroutrasdespesasimposto_apply
+          depends_on:
+            - task_key: fact_pagaroutrasdespesas_commit
+          notebook_task:
+            notebook_path: ${workspace.file_path}/pipeline/silver/incremental_facts.py
+            base_parameters:
+              entity: pagaroutrasdespesasimposto
+          description: "Aplica somente partições maduras de pagaroutrasdespesasimposto; nunca consome o dia ainda aberto"
+
+        - task_key: fact_pagaroutrasdespesasimposto_validate
+          depends_on:
+            - task_key: fact_pagaroutrasdespesasimposto_apply
+          notebook_task:
+            notebook_path: ${workspace.file_path}/pipeline/silver/validate_mature_incremental_facts.py
+            base_parameters:
+              entity: pagaroutrasdespesasimposto
+          description: "Valida o lote incremental maduro de pagaroutrasdespesasimposto antes do watermark"
+
+        - task_key: fact_pagaroutrasdespesasimposto_commit
+          depends_on:
+            - task_key: fact_pagaroutrasdespesasimposto_validate
+          notebook_task:
+            notebook_path: ${workspace.file_path}/pipeline/silver/commit_fact_watermark.py
+            base_parameters:
+              entity: pagaroutrasdespesasimposto
+          description: "Promove watermark de pagaroutrasdespesasimposto somente após validação"
 
         - task_key: silver_quality_gate
           depends_on:
             - task_key: silver_reference_dimensions
             - task_key: mercadologico_scd2_commit
             - task_key: silver_sales
-            - task_key: silver_facts
+            - task_key: fact_pagaroutrasdespesasimposto_commit
           notebook_task:
             notebook_path: ${workspace.file_path}/pipeline/silver/quality_gate.py
           description: "Valida Silver completa antes de construir Gold"
