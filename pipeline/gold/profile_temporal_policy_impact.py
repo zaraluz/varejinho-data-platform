@@ -5,8 +5,10 @@
 # Objetivo:
 # - NÃO alterar Silver/Gold.
 # - Medir quantas linhas deixam de receber SK quando o join deixa de usar is_current.
-# - Quantificar o peso financeiro dos casos temporalmente não resolvidos quando há métrica aditiva.
-# - Produzir evidência para escolher representação (ex.: membro UNKNOWN_TEMPORAL) sem fabricar história.
+# - Quantificar o peso financeiro dos casos que não casam sob o boundary temporal atual.
+# - Fazer análise de sensibilidade do boundary baseado em datacadastro; não decidir representação automaticamente.
+# - Lembrar que a primeira versão foi retrodatada para datacadastro como correção da carga inicial,
+#   sem reconstruir estados históricos anteriores aos snapshots do projeto.
 
 from pyspark.sql import functions as F
 
@@ -364,4 +366,4 @@ if other_unresolved:
     )
 
 print("\n✅ G3 concluído em modo read-only.")
-print("ℹ️ O gate mede impacto; não cria membro unknown e não altera joins da Gold.")
+print("ℹ️ O gate mede o impacto do boundary temporal atual; não conclui que o fato é inválido, não cria membro unknown e não altera a Gold.")
