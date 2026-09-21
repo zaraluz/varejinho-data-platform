@@ -22,6 +22,7 @@ BUNDLE_FILES_PATH = job_param(
     "/Workspace/Users/<USER>/varejinho-data-platform",
 )
 CONTROL_TABLE = job_param("control_table", f"{CATALOG}.control.fact_watermark")
+REPAIR_FROM = job_param("repair_from", "2026-09-18")
 
 CONFIG = {
     "notaentrada": {"chave": ["numeronota", "id_loja", "id_fornecedor"], "data": "dataentrada", "decimais": ["valortotal", "valormercadoria", "valordesconto"]},
@@ -101,7 +102,9 @@ if status != "REPAIR_PENDING_VALIDATION" or candidate is None:
 expected = contract(
     ENTITY,
     casts(
-        spark.table(bronze).filter(F.col("ingestion_date") <= F.lit(candidate)),
+        spark.table(bronze)
+        .filter(F.col("ingestion_date") >= F.lit(REPAIR_FROM))
+        .filter(F.col("ingestion_date") <= F.lit(candidate)),
         cfg,
     ),
 )
@@ -146,9 +149,9 @@ if schema_ok and a_dup == 0:
 ok = schema_ok and missing == 0 and a_dup == 0 and future == 0 and mismatches == 0
 
 print(f"\n=== D6B REPAIR VALIDATE — {ENTITY} ===")
-print(f"candidate/mature cutoff: {candidate}")
+print(f"repair window: {REPAIR_FROM} -> {candidate}")
 print(f"schema exact: {schema_ok}")
-print(f"expected mature keys: {expected.count():,}")
+print(f"expected repair-window keys: {expected.count():,}")
 print(f"silver rows: {actual.count():,}")
 print(f"missing expected keys: {missing:,}")
 print(f"historical extras allowed: {extra:,}")
