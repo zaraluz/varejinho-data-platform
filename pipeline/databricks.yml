@@ -2160,16 +2160,32 @@ resources:
               entity: mercadologico
           description: "Promove watermark mercadologico após validação"
 
-        - task_key: silver_sales
+        - task_key: sales_incremental_apply
           depends_on:
             - task_key: bronze_quality_gate
           notebook_task:
-            notebook_path: ${workspace.file_path}/pipeline/silver/transform_sales.py
-          description: "Processa silver.venda com cast, contrato e schema drift"
+            notebook_path: ${workspace.file_path}/pipeline/silver/incremental_sales.py
+          description: "Aplica somente partições maduras de venda; nunca consome o dia ainda aberto"
+
+        - task_key: sales_incremental_validate
+          depends_on:
+            - task_key: sales_incremental_apply
+          notebook_task:
+            notebook_path: ${workspace.file_path}/pipeline/silver/validate_mature_incremental_sales.py
+          description: "Valida o lote incremental maduro de venda antes do watermark"
+
+        - task_key: sales_incremental_commit
+          depends_on:
+            - task_key: sales_incremental_validate
+          notebook_task:
+            notebook_path: ${workspace.file_path}/pipeline/silver/commit_fact_watermark.py
+            base_parameters:
+              entity: venda
+          description: "Promove watermark de venda somente após validação"
 
         - task_key: fact_notaentrada_apply
           depends_on:
-            - task_key: bronze_quality_gate
+            - task_key: sales_incremental_commit
           notebook_task:
             notebook_path: ${workspace.file_path}/pipeline/silver/incremental_facts.py
             base_parameters:
@@ -2522,7 +2538,7 @@ resources:
           depends_on:
             - task_key: silver_reference_dimensions
             - task_key: mercadologico_scd2_commit
-            - task_key: silver_sales
+            - task_key: sales_incremental_commit
             - task_key: fact_pagaroutrasdespesasimposto_commit
           notebook_task:
             notebook_path: ${workspace.file_path}/pipeline/silver/quality_gate.py
