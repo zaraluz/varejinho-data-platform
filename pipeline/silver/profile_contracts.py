@@ -65,36 +65,26 @@ if len(entity_policy) != 37:
     )
 
 ROOT_ALLOWED = {
-    "table",
-    "owner",
-    "description",
-    "sla_freshness_hours",
-    "grain",
-    "columns",
-    "quality_rules",
+    "table", "owner", "description", "sla_freshness_hours",
+    "grain", "columns", "quality_rules",
 }
 COLUMN_ALLOWED = {
-    "name",
-    "type",
-    "nullable",
-    "unique",
-    "min",
-    "max",
-    "accepted_values",
-    "description",
+    "name", "type", "nullable", "unique", "min", "max",
+    "accepted_values", "description",
 }
 RULE_ALLOWED = {
-    "rule",
-    "key",
-    "columns",
-    "column",
-    "references",
-    "severity",
-    "max_age_hours",
-    "min",
-    "max",
-    "accepted_values",
+    "rule", "key", "columns", "column", "references", "severity",
+    "max_age_hours", "min", "max", "accepted_values",
 }
+
+
+def compact_json(value):
+    return json.dumps(value, ensure_ascii=False, separators=(",", ":"))
+
+
+def tier_order(tier):
+    return {"critical": 1, "high": 2, "standard": 3}.get(tier, 9)
+
 
 details = []
 
@@ -140,12 +130,12 @@ for entity in sorted(entity_policy):
             contract = yaml.safe_load(f) or {}
         row["yaml_parse_ok"] = True
     except Exception as e:
-        row["notes"] = f"YAML_PARSE_ERROR: {str(e)[:240]}"
+        row["notes"] = f"YAML_PARSE_ERROR:{str(e)[:240]}"
         details.append(row)
         continue
 
     root_extra = sorted(set(contract) - ROOT_ALLOWED)
-    row["malformed_root_keys"] = json.dumps(root_extra, ensure_ascii=False)
+    row["malformed_root_keys"] = compact_json(root_extra)
 
     table_declared = str(contract.get("table", "") or "")
     row["hardcoded_table"] = table_declared.startswith("varejinho.")
@@ -175,12 +165,12 @@ for entity in sorted(entity_policy):
         if name in names_seen:
             duplicate_names.append(name)
         names_seen.add(name)
+        declared_types[name] = (
+            str(col_cfg.get("type", "") or "").lower().replace(" ", "")
+        )
 
-        declared_types[name] = str(col_cfg.get("type", "") or "").lower().replace(" ", "")
-
-    row["malformed_column_keys"] = json.dumps(
-        malformed_columns + [f"duplicate:{x}" for x in duplicate_names],
-        ensure_ascii=False,
+    row["malformed_column_keys"] = compact_json(
+        malformed_columns + [f"duplicate:{x}" for x in duplicate_names]
     )
 
     rules = contract.get("quality_rules", []) or []
@@ -214,15 +204,15 @@ for entity in sorted(entity_policy):
         if ref.startswith("varejinho."):
             hardcoded_refs += 1
 
-    row["malformed_rule_keys"] = json.dumps(malformed_rules, ensure_ascii=False)
-    row["declared_rule_types"] = json.dumps(sorted(set(rule_types)), ensure_ascii=False)
+    row["malformed_rule_keys"] = compact_json(malformed_rules)
+    row["declared_rule_types"] = compact_json(sorted(set(rule_types)))
     row["declared_error_rules"] = error_rules
     row["declared_warning_rules"] = warning_rules
     row["hardcoded_references"] = hardcoded_refs
 
     grain = contract.get("grain", []) or []
     grain_missing = [c for c in grain if c not in names_seen]
-    row["grain_missing_columns"] = json.dumps(grain_missing, ensure_ascii=False)
+    row["grain_missing_columns"] = compact_json(grain_missing)
 
     if row["silver_table_exists"]:
         actual_schema = {
@@ -231,9 +221,7 @@ for entity in sorted(entity_policy):
         }
 
         missing_declared = sorted(set(names_seen) - set(actual_schema))
-        row["missing_declared_columns"] = json.dumps(
-            missing_declared, ensure_ascii=False
-        )
+        row["missing_declared_columns"] = compact_json(missing_declared)
 
         type_mismatches = []
         for name, declared_type in declared_types.items():
@@ -244,14 +232,10 @@ for entity in sorted(entity_policy):
                 type_mismatches.append(
                     f"{name}:contract={declared_type}|actual={actual_type}"
                 )
-        row["type_mismatches"] = json.dumps(
-            type_mismatches, ensure_ascii=False
-        )
+        row["type_mismatches"] = compact_json(type_mismatches)
     else:
         row["notes"] = "SILVER_TABLE_MISSING"
 
-    # O runtime ativo hoje NÃO interpreta quality_rules centralmente:
-    # as cópias inline aplicam apenas nullable/min de columns.
     if not row["notes"]:
         findings = []
         if malformed_columns or malformed_rules or root_extra:
@@ -267,6 +251,7 @@ for entity in sorted(entity_policy):
         row["notes"] = "|".join(findings) if findings else "STATICALLY_ALIGNED"
 
     details.append(row)
+
 
 detail_df = spark.createDataFrame(details)
 
@@ -308,7 +293,47 @@ print("\n=== C1 SUMMARY ===")
 for key in summary.asDict():
     print(f"{key}: {summary[key]}")
 
-print("\nDeclared rule types:")
+print("\n=== C1 DETAIL — ACTIONABLE FINDINGS ===")
+for row in sorted(details, key=lambda r: (tier_order(r["tier"]), r["entity"])):
+    actionable = (
+        not row["contract_exists"]
+        or row["malformed_root_keys"] != "[]"
+        or row["malformed_column_keys"] != "[]"
+        or row["malformed_rule_keys"] != "[]"
+        or row["hardcoded_table"]
+        or row["hardcoded_references"] > 0
+        or row["missing_declared_columns"] != "[]"
+        or row["type_mismatches"] != "[]"
+        or row["grain_missing_columns"] != "[]"
+    )
+    if not actionable:
+        continue
+
+    print(f"\n[{row['tier'].upper()}] {row['entity']}")
+    print(
+        f"  contract_exists={row['contract_exists']} | "
+        f"required={row['contract_required']} | "
+        f"silver_table_exists={row['silver_table_exists']}"
+    )
+    print(
+        f"  hardcoded_table={row['hardcoded_table']} | "
+        f"hardcoded_references={row['hardcoded_references']}"
+    )
+    if row["malformed_root_keys"] != "[]":
+        print(f"  malformed_root_keys={row['malformed_root_keys']}")
+    if row["malformed_column_keys"] != "[]":
+        print(f"  malformed_column_keys={row['malformed_column_keys']}")
+    if row["malformed_rule_keys"] != "[]":
+        print(f"  malformed_rule_keys={row['malformed_rule_keys']}")
+    if row["grain_missing_columns"] != "[]":
+        print(f"  grain_missing_columns={row['grain_missing_columns']}")
+    if row["missing_declared_columns"] != "[]":
+        print(f"  stale_columns={row['missing_declared_columns']}")
+    if row["type_mismatches"] != "[]":
+        print(f"  type_mismatches={row['type_mismatches']}")
+    print(f"  notes={row['notes']}")
+
+print("\n=== DECLARED RULE TYPES ===")
 (
     detail_df.select(
         "entity", "tier", "declared_rule_types",
@@ -325,4 +350,4 @@ print("- incremental_sales.py e incremental_facts.py duplicam essa lógica inlin
 print("- quality_rules (no_duplicates/RI/freshness/severity) não são interpretadas por um engine central.")
 print("- contrato ausente em incremental_facts.py hoje é fail-open.")
 print("- tipos declarados não são validados pelo runtime atual.")
-print("\n✅ C1 concluído em modo read-only. Use o summary para corrigir contratos/engine antes de enforcement.")
+print("\n✅ C1 concluído em modo read-only. Use SUMMARY + DETAIL para canonicalizar os contratos antes de enforcement.")
