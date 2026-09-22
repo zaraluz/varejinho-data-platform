@@ -1,6 +1,9 @@
 # Databricks notebook source
 # pipeline/silver/prepare_fact_incremental_fixture.py
 # Gate D4 — fixture sandbox para provar update/insert/no-delete/quarantine/watermark.
+# Também cria explicitamente o baseline de Schema Drift dentro do sandbox D4.
+
+import importlib.util
 
 from pyspark.sql import functions as F
 
@@ -13,6 +16,13 @@ def job_param(nome: str, default: str) -> str:
 
 
 CATALOG = job_param("catalog", "varejinho_dev")
+BUNDLE_FILES_PATH = job_param(
+    "bundle_files_path",
+    "/Workspace/Users/<USER>/varejinho-data-platform",
+)
+CONTROL_ROOT = job_param("control_root", "s3://varejinho-lake/_control/dev").rstrip("/")
+DRIFT_CONTROL_ROOT = CONTROL_ROOT if CONTROL_ROOT.endswith("/d4") else f"{CONTROL_ROOT}/d4"
+
 BRONZE = f"{CATALOG}.control._d4_pedido_bronze"
 SILVER = f"{CATALOG}.silver._d4_pedido"
 CONTROL = f"{CATALOG}.control._d4_fact_watermark"
@@ -21,6 +31,10 @@ HIST = f"{CATALOG}.silver._d4_quarantine_history_pedido"
 
 if not CATALOG.endswith("_dev"):
     raise Exception(f"Gate D4 só pode executar em *_dev. Recebido: {CATALOG}")
+
+# A fixture precisa de registry próprio. Remover o sandbox anterior é parte do setup,
+# nunca toca no registry real em .../_control/dev/schema_registry.
+dbutils.fs.rm(DRIFT_CONTROL_ROOT, True)
 
 for table in [HIST, QUAR, SILVER, CONTROL, BRONZE]:
     spark.sql(f"DROP TABLE IF EXISTS {table}")
@@ -67,6 +81,25 @@ baseline = (
 )
 baseline.write.format("delta").mode("overwrite").saveAsTable(SILVER)
 
+# Bootstrap explícito do baseline SOMENTE no registry sandbox da fixture.
+ENGINE_PATH = f"{BUNDLE_FILES_PATH}/quality/schema_drift_engine.py"
+_spec = importlib.util.spec_from_file_location("d4_schema_drift_engine", ENGINE_PATH)
+if _spec is None or _spec.loader is None:
+    raise ImportError(f"Não foi possível carregar schema drift engine: {ENGINE_PATH}")
+_module = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(_module)
+SchemaDriftEngine = _module.SchemaDriftEngine
+
+SchemaDriftEngine(
+    dbutils=dbutils,
+    control_root=DRIFT_CONTROL_ROOT,
+).bootstrap_baseline(
+    entity="pedido",
+    df=spark.table(SILVER),
+    approved_by="fixture:d4",
+    reason="D4 sandbox baseline from initial committed Silver fixture",
+)
+
 spark.sql(f"""
     CREATE TABLE {CONTROL} (
         entity STRING NOT NULL,
@@ -85,5 +118,7 @@ print("\n=== GATE D4 — PREPARE FACT INCREMENTAL FIXTURE ===")
 print(f"Bronze sandbox: {BRONZE}")
 print(f"Silver baseline:{SILVER}")
 print(f"Control:        {CONTROL}")
+print(f"Drift registry: {DRIFT_CONTROL_ROOT}/schema_registry/pedido.json")
 print("Cenários: D2/D3 pendentes, update, insert, ausência sem delete e quarentena.")
-print("✅ Fixture pronta; nenhum dado real foi alterado.")
+print("✅ Fixture pronta; baseline de drift criado somente no sandbox D4.")
+print("✅ Nenhum dado real foi alterado.")
