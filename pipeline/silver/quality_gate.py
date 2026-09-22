@@ -37,7 +37,7 @@ def derive_bundle_files_path() -> str:
     return workspace_path.split(marker, 1)[0]
 
 
-CATALOG = job_param("catalog", "varejinho")
+CATALOG = job_param("catalog", "varejinho_dev")
 BRONZE_SOURCE_CATALOG = job_param("bronze_source_catalog", "varejinho")
 BUNDLE_FILES_PATH = job_param("bundle_files_path", derive_bundle_files_path())
 FACT_WATERMARK = f"{CATALOG}.control.fact_watermark"
