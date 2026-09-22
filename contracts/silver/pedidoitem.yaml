@@ -1,17 +1,38 @@
-table: varejinho.silver.pedidoitem
+table: pedidoitem
 owner: zara.louise
 description: Itens dos pedidos de compra — grão 1 linha por item
 sla_freshness_hours: 24
-grain: [id]
+grain:
+  - id
 
 columns:
-  - {name: id,          type: bigint,        nullable: false, unique: true}
-  - {name: id_pedido,   type: bigint,        nullable: false}
-  - {name: id_produto,  type: int,           nullable: false}
-  - {name: quantidade,  type: decimal(14,3), nullable: false, min: 0}
-  - {name: valortotal,  type: decimal(14,3), nullable: false, min: 0}
+  - name: id
+    type: string
+    nullable: false
+    unique: true
+  - name: id_pedido
+    type: string
+    nullable: false
+  - name: id_produto
+    type: string
+    nullable: false
+  - name: quantidade
+    type: "decimal(14,3)"
+    nullable: false
+    min: 0
+  - name: valortotal
+    type: "decimal(14,3)"
+    nullable: false
+    min: 0
 
 quality_rules:
-  - {rule: no_duplicates,         key: [id],                    severity: error}
-  - {rule: not_null,              columns: [id, id_pedido, id_produto], severity: error}
-  - {rule: referential_integrity, column: id_pedido, references: varejinho.silver.pedido.id, severity: warning}
+  - rule: no_duplicates
+    key: [id]
+    severity: error
+  - rule: not_null
+    columns: [id, id_pedido, id_produto]
+    severity: error
+  - rule: referential_integrity
+    column: id_pedido
+    references: pedido.id
+    severity: warning
