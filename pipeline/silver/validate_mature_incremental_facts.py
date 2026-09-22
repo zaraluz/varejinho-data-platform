@@ -1,7 +1,7 @@
 # Databricks notebook source
 # pipeline/silver/validate_mature_incremental_facts.py
 # Validação batch-level para fatos incrementais com partições maduras.
-# Expected e runtime usam o mesmo contract engine canônico.
+# Expected e runtime usam os mesmos engines canônicos de Drift + Contracts.
 #
 # Semântica:
 # - compara apenas o lote (committed, candidate]
@@ -44,6 +44,7 @@ def derive_bundle_files_path() -> str:
 CATALOG = job_param("catalog", "varejinho_dev")
 ENTITY = job_param("entity", "all")
 BUNDLE_FILES_PATH = job_param("bundle_files_path", derive_bundle_files_path())
+CONTROL_ROOT = job_param("control_root", "s3://varejinho-lake/_control/dev")
 CONTROL_TABLE = job_param("control_table", f"{CATALOG}.control.fact_watermark")
 BRONZE_OVERRIDE = job_param("bronze_table", "")
 SILVER_OVERRIDE = job_param("silver_table", "")
@@ -65,6 +66,21 @@ SilverContractRuntime = _contract_runtime_module.SilverContractRuntime
 CONTRACTS = SilverContractRuntime(
     spark=spark,
     catalog=CATALOG,
+    bundle_files_path=BUNDLE_FILES_PATH,
+)
+
+DRIFT_RUNTIME_PATH = f"{BUNDLE_FILES_PATH}/quality/schema_drift_runtime.py"
+_drift_spec = importlib.util.spec_from_file_location(
+    "varejinho_schema_drift_runtime_validate_mature", DRIFT_RUNTIME_PATH
+)
+if _drift_spec is None or _drift_spec.loader is None:
+    raise ImportError(f"Não foi possível carregar schema drift runtime: {DRIFT_RUNTIME_PATH}")
+_drift_module = importlib.util.module_from_spec(_drift_spec)
+_drift_spec.loader.exec_module(_drift_module)
+SilverSchemaDriftRuntime = _drift_module.SilverSchemaDriftRuntime
+DRIFT = SilverSchemaDriftRuntime(
+    dbutils=dbutils,
+    control_root=CONTROL_ROOT,
     bundle_files_path=BUNDLE_FILES_PATH,
 )
 
@@ -157,9 +173,10 @@ def validar(entity):
     batch = batch.filter(F.col("ingestion_date") <= F.lit(candidate))
 
     typed_batch = aplicar_casts(batch, cfg)
+    accepted_batch, drift_report = DRIFT.evaluate(entity, typed_batch)
     expected, _, contract_report = CONTRACTS.validate_snapshot_history(
         validator,
-        typed_batch,
+        accepted_batch,
         keys,
     )
     CONTRACTS.log_report(f"validate_mature:{entity}", contract_report)
@@ -228,6 +245,7 @@ def validar(entity):
     print(f"\n=== VALIDATE MATURE FACT INCREMENTAL — {entity} ===")
     print(f"committed:          {committed}")
     print(f"candidate:          {candidate}")
+    print(f"drift:              {drift_report['classification']}")
     print(f"batch expected rows:{expected.count():,}")
     print(f"silver total rows:  {actual.count():,}")
     print(f"schema exact:       {schema_ok}")
@@ -275,6 +293,6 @@ for entity in entities:
     validar(entity)
 
 print("\n✅ Validação batch-level das partições maduras concluída.")
-print("✅ Expected foi produzido pelo mesmo contract engine do APPLY.")
+print("✅ Expected foi produzido pelos mesmos engines de Drift + Contracts do APPLY.")
 print("✅ Chaves históricas extras são permitidas pela política no-delete.")
 print("✅ Nenhum watermark foi committed por esta task.")
