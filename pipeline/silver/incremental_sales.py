@@ -263,16 +263,17 @@ if not snapshots:
 
 typed = transformar(pending)
 
-# Venda é current-state por id: validar somente o latest candidate, preservando
-# empates do mesmo snapshot para que no_duplicates possa quarantinar ambos.
-candidate_batch = CONTRACTS.latest_candidate(typed, ["id"])
-valid, invalid, contract_report = VALIDATOR.validate(candidate_batch)
-invalid = CONTRACTS.normalize_quarantine(invalid)
+# Valida todo o lote maduro. Unicidade é por id+snapshot; depois escolhemos
+# o último estado VÁLIDO por id, preservando update/insert/quarantine históricos.
+source, invalid, contract_report = CONTRACTS.validate_snapshot_history(
+    VALIDATOR,
+    typed,
+    ["id"],
+)
 CONTRACTS.log_report("venda", contract_report)
 
 # Só atualizamos o baseline de drift após o contrato estrutural passar.
 detectar_drift(typed)
-source = valid
 
 (
     DeltaTable.forName(spark, SILVER).alias("t")
@@ -319,7 +320,7 @@ if (
 
 print(
     f"✅ APPLY venda concluído | snapshots={len(snapshots)} "
-    f"| candidate rows={candidate_batch.count():,} "
+    f"| contract rows={contract_report['total']:,} "
     f"| source final={source.count():,} | quarantine={invalid_count:,}"
 )
 print(
