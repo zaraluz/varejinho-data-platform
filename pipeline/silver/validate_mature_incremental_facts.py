@@ -1,6 +1,7 @@
 # Databricks notebook source
 # pipeline/silver/validate_mature_incremental_facts.py
 # Validação batch-level para fatos incrementais com partições maduras.
+# Expected e runtime usam o mesmo contract engine canônico.
 #
 # Semântica:
 # - compara apenas o lote (committed, candidate]
@@ -9,24 +10,40 @@
 # - falha se a Silver contiver qualquer linha com ingestion_date > candidate
 
 from functools import reduce
+import importlib.util
+
 from pyspark.sql import functions as F
-from pyspark.sql.window import Window
-import yaml
 
 
 def job_param(nome: str, default: str) -> str:
     try:
-        return dbutils.widgets.get(nome)
+        value = dbutils.widgets.get(nome)
+        return value if value else default
     except Exception:
         return default
 
 
+def derive_bundle_files_path() -> str:
+    """Resolve o root .../files tanto em execução manual quanto via bundle."""
+    raw = (
+        dbutils.notebook.entry_point.getDbutils()
+        .notebook()
+        .getContext()
+        .notebookPath()
+        .get()
+    )
+    workspace_path = raw if raw.startswith("/Workspace/") else f"/Workspace{raw}"
+    marker = "/pipeline/silver/"
+    if marker not in workspace_path:
+        raise Exception(
+            f"validate_mature_incremental_facts fora do layout esperado do bundle: {workspace_path}"
+        )
+    return workspace_path.split(marker, 1)[0]
+
+
 CATALOG = job_param("catalog", "varejinho_dev")
 ENTITY = job_param("entity", "all")
-BUNDLE_FILES_PATH = job_param(
-    "bundle_files_path",
-    "/Workspace/Users/<USER>/varejinho-data-platform",
-)
+BUNDLE_FILES_PATH = job_param("bundle_files_path", derive_bundle_files_path())
 CONTROL_TABLE = job_param("control_table", f"{CATALOG}.control.fact_watermark")
 BRONZE_OVERRIDE = job_param("bronze_table", "")
 SILVER_OVERRIDE = job_param("silver_table", "")
@@ -35,6 +52,21 @@ if not CATALOG.endswith("_dev"):
     raise Exception(
         f"validate_mature_incremental_facts só pode executar em *_dev. Recebido: {CATALOG}"
     )
+
+CONTRACT_RUNTIME_PATH = f"{BUNDLE_FILES_PATH}/quality/contract_runtime.py"
+_runtime_spec = importlib.util.spec_from_file_location(
+    "varejinho_contract_runtime_validate_mature", CONTRACT_RUNTIME_PATH
+)
+if _runtime_spec is None or _runtime_spec.loader is None:
+    raise ImportError(f"Não foi possível carregar contract runtime: {CONTRACT_RUNTIME_PATH}")
+_contract_runtime_module = importlib.util.module_from_spec(_runtime_spec)
+_runtime_spec.loader.exec_module(_contract_runtime_module)
+SilverContractRuntime = _contract_runtime_module.SilverContractRuntime
+CONTRACTS = SilverContractRuntime(
+    spark=spark,
+    catalog=CATALOG,
+    bundle_files_path=BUNDLE_FILES_PATH,
+)
 
 CONFIG = {
     "notaentrada": {"chave": ["numeronota", "id_loja", "id_fornecedor"], "data": "dataentrada", "decimais": ["valortotal", "valormercadoria", "valordesconto"]},
@@ -89,48 +121,12 @@ def aplicar_casts(df, cfg):
     return df
 
 
-def filtrar_contrato(entity, df):
-    path = f"{BUNDLE_FILES_PATH}/contracts/silver/{entity}.yaml"
-    try:
-        with open(path, "r") as f:
-            contract = yaml.safe_load(f)
-    except FileNotFoundError:
-        return df
-
-    work = df.withColumn("_invalido", F.lit(False))
-
-    for cfg in contract.get("columns", []):
-        name = cfg.get("name")
-        if name not in work.columns:
-            continue
-
-        if not cfg.get("nullable", True):
-            work = work.withColumn(
-                "_invalido",
-                F.when(F.col(name).isNull(), F.lit(True))
-                 .otherwise(F.col("_invalido")),
-            )
-
-        min_val = cfg.get("min")
-        if min_val is not None:
-            try:
-                min_num = float(min_val)
-                work = work.withColumn(
-                    "_invalido",
-                    F.when(F.col(name).cast("double") < min_num, F.lit(True))
-                     .otherwise(F.col("_invalido")),
-                )
-            except (TypeError, ValueError):
-                pass
-
-    return work.where(~F.col("_invalido")).drop("_invalido")
-
-
 def validar(entity):
     cfg = CONFIG[entity]
     keys = cfg["chave"]
     bronze = BRONZE_OVERRIDE or f"{CATALOG}.bronze.{entity}"
     silver = SILVER_OVERRIDE or f"{CATALOG}.silver.{entity}"
+    validator = CONTRACTS.validator(entity, keys)
 
     rows = (
         spark.table(CONTROL_TABLE)
@@ -160,14 +156,13 @@ def validar(entity):
         batch = batch.filter(F.col("ingestion_date") > F.lit(committed))
     batch = batch.filter(F.col("ingestion_date") <= F.lit(candidate))
 
-    expected = filtrar_contrato(entity, aplicar_casts(batch, cfg))
-
-    w = Window.partitionBy(*keys).orderBy(F.col("ingestion_date").desc())
-    expected = (
-        expected.withColumn("_rn", F.row_number().over(w))
-        .where(F.col("_rn") == 1)
-        .drop("_rn")
+    typed_batch = aplicar_casts(batch, cfg)
+    expected, _, contract_report = CONTRACTS.validate_snapshot_history(
+        validator,
+        typed_batch,
+        keys,
     )
+    CONTRACTS.log_report(f"validate_mature:{entity}", contract_report)
 
     actual = spark.table(silver)
 
@@ -280,5 +275,6 @@ for entity in entities:
     validar(entity)
 
 print("\n✅ Validação batch-level das partições maduras concluída.")
+print("✅ Expected foi produzido pelo mesmo contract engine do APPLY.")
 print("✅ Chaves históricas extras são permitidas pela política no-delete.")
 print("✅ Nenhum watermark foi committed por esta task.")
