@@ -1,6 +1,9 @@
 # Databricks notebook source
 # pipeline/silver/prepare_sales_incremental_fixture.py
 # Gate D7C — fixture para provar venda incremental D+1.
+# Também cria explicitamente o baseline de Schema Drift dentro do sandbox D7C.
+
+import importlib.util
 
 from pyspark.sql import functions as F
 
@@ -13,6 +16,13 @@ def job_param(nome: str, default: str) -> str:
 
 
 CATALOG = job_param("catalog", "varejinho_dev")
+BUNDLE_FILES_PATH = job_param(
+    "bundle_files_path",
+    "/Workspace/Users/<USER>/varejinho-data-platform",
+)
+CONTROL_ROOT = job_param("control_root", "s3://varejinho-lake/_control/dev").rstrip("/")
+DRIFT_CONTROL_ROOT = CONTROL_ROOT if CONTROL_ROOT.endswith("/d7c") else f"{CONTROL_ROOT}/d7c"
+
 BRONZE = f"{CATALOG}.control._d7c_venda_bronze"
 SILVER = f"{CATALOG}.silver._d7c_venda"
 CONTROL = f"{CATALOG}.control._d7c_fact_watermark"
@@ -21,6 +31,9 @@ HIST = f"{CATALOG}.silver._d7c_quarantine_history_venda"
 
 if not CATALOG.endswith("_dev"):
     raise Exception(f"Gate D7C só pode executar em *_dev. Recebido: {CATALOG}")
+
+# Registry isolado da fixture. Nunca remove o registry real em .../_control/dev/schema_registry.
+dbutils.fs.rm(DRIFT_CONTROL_ROOT, True)
 
 for table in [HIST, QUAR, SILVER, CONTROL, BRONZE]:
     spark.sql(f"DROP TABLE IF EXISTS {table}")
@@ -87,6 +100,25 @@ baseline = (
 )
 baseline.write.format("delta").mode("overwrite").saveAsTable(SILVER)
 
+# Bootstrap explícito do baseline SOMENTE no registry sandbox da fixture.
+ENGINE_PATH = f"{BUNDLE_FILES_PATH}/quality/schema_drift_engine.py"
+_spec = importlib.util.spec_from_file_location("d7c_schema_drift_engine", ENGINE_PATH)
+if _spec is None or _spec.loader is None:
+    raise ImportError(f"Não foi possível carregar schema drift engine: {ENGINE_PATH}")
+_module = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(_module)
+SchemaDriftEngine = _module.SchemaDriftEngine
+
+SchemaDriftEngine(
+    dbutils=dbutils,
+    control_root=DRIFT_CONTROL_ROOT,
+).bootstrap_baseline(
+    entity="venda",
+    df=spark.table(SILVER),
+    approved_by="fixture:d7c",
+    reason="D7C sandbox baseline from initial committed Silver fixture",
+)
+
 spark.sql(f"""
     CREATE TABLE {CONTROL} (
         entity STRING NOT NULL,
@@ -106,4 +138,5 @@ print("\n=== D7C — PREPARE VENDA INCREMENTAL FIXTURE ===")
 print("D1 committed; D2 madura; D3 aberta.")
 print("D2 inclui update idempotente, insert novo e 1 inválido.")
 print("Expected: somente D2 entra; D3 fica intocada.")
-print("✅ Sandbox criado.")
+print(f"Drift registry: {DRIFT_CONTROL_ROOT}/schema_registry/venda.json")
+print("✅ Sandbox criado com baseline de drift explícito e isolado.")
