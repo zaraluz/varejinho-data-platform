@@ -22,10 +22,18 @@ BUNDLE_FILES_PATH = job_param(
     "bundle_files_path",
     "/Workspace/Users/<USER>/varejinho-data-platform",
 )
-CONTROL_ROOT = job_param("control_root", "s3://varejinho-lake/_control/dev")
+CONTROL_ROOT = job_param("control_root", "s3://varejinho-lake/_control/dev").rstrip("/")
 CONTROL_TABLE = job_param("control_table", f"{CATALOG}.control.fact_watermark")
 BRONZE_OVERRIDE = job_param("bronze_table", "")
 SILVER_OVERRIDE = job_param("silver_table", "")
+
+# A fixture D4 isola tabelas e registry. Em runtime real, CONTROL_ROOT permanece intacto.
+_is_d4_fixture = "_d4_" in " ".join([BRONZE_OVERRIDE, SILVER_OVERRIDE, CONTROL_TABLE])
+DRIFT_CONTROL_ROOT = (
+    CONTROL_ROOT
+    if (not _is_d4_fixture or CONTROL_ROOT.endswith("/d4"))
+    else f"{CONTROL_ROOT}/d4"
+)
 
 if not CATALOG.endswith("_dev"):
     raise Exception(
@@ -58,7 +66,7 @@ _drift_spec.loader.exec_module(_drift_module)
 SilverSchemaDriftRuntime = _drift_module.SilverSchemaDriftRuntime
 DRIFT = SilverSchemaDriftRuntime(
     dbutils=dbutils,
-    control_root=CONTROL_ROOT,
+    control_root=DRIFT_CONTROL_ROOT,
     bundle_files_path=BUNDLE_FILES_PATH,
 )
 
