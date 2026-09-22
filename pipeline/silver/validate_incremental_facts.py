@@ -1,7 +1,7 @@
 # Databricks notebook source
 # pipeline/silver/validate_incremental_facts.py
 # Valida Silver após APPLY incremental e antes do commit do fact_watermark.
-# Expected e runtime usam o mesmo contract engine canônico.
+# Expected e runtime usam os mesmos engines canônicos de Drift + Contracts.
 
 from functools import reduce
 import importlib.util
@@ -22,6 +22,7 @@ BUNDLE_FILES_PATH = job_param(
     "bundle_files_path",
     "/Workspace/Users/<USER>/varejinho-data-platform",
 )
+CONTROL_ROOT = job_param("control_root", "s3://varejinho-lake/_control/dev")
 CONTROL_TABLE = job_param("control_table", f"{CATALOG}.control.fact_watermark")
 BRONZE_OVERRIDE = job_param("bronze_table", "")
 SILVER_OVERRIDE = job_param("silver_table", "")
@@ -43,6 +44,21 @@ SilverContractRuntime = _contract_runtime_module.SilverContractRuntime
 CONTRACTS = SilverContractRuntime(
     spark=spark,
     catalog=CATALOG,
+    bundle_files_path=BUNDLE_FILES_PATH,
+)
+
+DRIFT_RUNTIME_PATH = f"{BUNDLE_FILES_PATH}/quality/schema_drift_runtime.py"
+_drift_spec = importlib.util.spec_from_file_location(
+    "varejinho_schema_drift_runtime_validate", DRIFT_RUNTIME_PATH
+)
+if _drift_spec is None or _drift_spec.loader is None:
+    raise ImportError(f"Não foi possível carregar schema drift runtime: {DRIFT_RUNTIME_PATH}")
+_drift_module = importlib.util.module_from_spec(_drift_spec)
+_drift_spec.loader.exec_module(_drift_module)
+SilverSchemaDriftRuntime = _drift_module.SilverSchemaDriftRuntime
+DRIFT = SilverSchemaDriftRuntime(
+    dbutils=dbutils,
+    control_root=CONTROL_ROOT,
     bundle_files_path=BUNDLE_FILES_PATH,
 )
 
@@ -133,9 +149,10 @@ def validar(entity):
         .filter(F.col("ingestion_date") <= F.lit(candidate))
     )
     expected_history = aplicar_casts(expected_history, cfg)
+    accepted_history, drift_report = DRIFT.evaluate(entity, expected_history)
     expected, _, contract_report = CONTRACTS.validate_snapshot_history(
         validator,
-        expected_history,
+        accepted_history,
         keys,
     )
     CONTRACTS.log_report(f"validate:{entity}", contract_report)
@@ -200,6 +217,7 @@ def validar(entity):
 
     print(f"\n=== VALIDATE FACT INCREMENTAL — {entity} ===")
     print(f"candidate:      {candidate}")
+    print(f"drift:          {drift_report['classification']}")
     print(f"schema exact:   {schema_ok}")
     print(f"rows:           expected={e_rows:,} | actual={a_rows:,}")
     print(f"duplicate keys: expected={e_dup:,} | actual={a_dup:,}")
