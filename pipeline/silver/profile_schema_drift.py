@@ -31,16 +31,19 @@ def resolve_bundle_files_path() -> str:
         return explicit.rstrip("/")
 
     try:
-        notebook_path = (
+        raw = (
             dbutils.notebook.entry_point.getDbutils()
             .notebook()
             .getContext()
             .notebookPath()
             .get()
         )
+        # notebookPath() normalmente retorna /Users/... no Databricks,
+        # enquanto arquivos sincronizados pelo bundle são acessíveis via /Workspace/Users/...
+        workspace_path = raw if raw.startswith("/Workspace/") else f"/Workspace{raw}"
         marker = "/pipeline/silver/profile_schema_drift"
-        if marker in notebook_path:
-            return notebook_path.split(marker, 1)[0]
+        if marker in workspace_path:
+            return workspace_path.split(marker, 1)[0]
     except Exception:
         pass
 
