@@ -1,12 +1,12 @@
 # Databricks notebook source
 # pipeline/silver/validate_mature_incremental_sales.py
 # Gate D7C — valida somente o lote maduro novo de venda antes do commit.
+# Expected e runtime usam o mesmo contract engine canônico.
 
 from functools import reduce
-import yaml
+import importlib.util
 
 from pyspark.sql import functions as F
-from pyspark.sql.window import Window
 
 
 def job_param(nome: str, default: str) -> str:
@@ -24,13 +24,28 @@ BUNDLE_FILES_PATH = job_param(
 CONTROL_TABLE = job_param("control_table", f"{CATALOG}.control.fact_watermark")
 BRONZE = job_param("bronze_table", f"{CATALOG}.bronze.venda")
 SILVER = job_param("silver_table", f"{CATALOG}.silver.venda")
-CONTRACT = f"{BUNDLE_FILES_PATH}/contracts/silver/venda.yaml"
 
 if not CATALOG.endswith("_dev"):
     raise Exception(
         f"validate_mature_incremental_sales só pode executar em *_dev. "
         f"Recebido: {CATALOG}"
     )
+
+CONTRACT_RUNTIME_PATH = f"{BUNDLE_FILES_PATH}/quality/contract_runtime.py"
+_runtime_spec = importlib.util.spec_from_file_location(
+    "varejinho_contract_runtime_validate_sales", CONTRACT_RUNTIME_PATH
+)
+if _runtime_spec is None or _runtime_spec.loader is None:
+    raise ImportError(f"Não foi possível carregar contract runtime: {CONTRACT_RUNTIME_PATH}")
+_contract_runtime_module = importlib.util.module_from_spec(_runtime_spec)
+_runtime_spec.loader.exec_module(_contract_runtime_module)
+SilverContractRuntime = _contract_runtime_module.SilverContractRuntime
+CONTRACTS = SilverContractRuntime(
+    spark=spark,
+    catalog=CATALOG,
+    bundle_files_path=BUNDLE_FILES_PATH,
+)
+VALIDATOR = CONTRACTS.validator("venda", ["id"])
 
 
 def transformar(df):
@@ -52,39 +67,6 @@ def transformar(df):
         .withColumn("mes", F.month("data"))
         .withColumnRenamed("valortotal", "valor_total")
     )
-
-
-def valid_only(df):
-    with open(CONTRACT, "r") as f:
-        contract = yaml.safe_load(f)
-
-    work = df.withColumn("_invalido", F.lit(False))
-
-    for cfg in contract.get("columns", []):
-        name = cfg.get("name")
-        if name not in work.columns:
-            continue
-
-        if not cfg.get("nullable", True):
-            work = work.withColumn(
-                "_invalido",
-                F.when(F.col(name).isNull(), True)
-                 .otherwise(F.col("_invalido")),
-            )
-
-        min_val = cfg.get("min")
-        if min_val is not None:
-            try:
-                min_num = float(min_val)
-                work = work.withColumn(
-                    "_invalido",
-                    F.when(F.col(name).cast("double") < min_num, True)
-                     .otherwise(F.col("_invalido")),
-                )
-            except (TypeError, ValueError):
-                pass
-
-    return work.where(~F.col("_invalido")).drop("_invalido")
 
 
 rows = (
@@ -115,13 +97,12 @@ if committed is not None:
     batch = batch.filter(F.col("ingestion_date") > F.lit(committed))
 batch = batch.filter(F.col("ingestion_date") <= F.lit(candidate))
 
-expected = valid_only(transformar(batch))
-w = Window.partitionBy("id").orderBy(F.col("ingestion_date").desc())
-expected = (
-    expected.withColumn("_rn", F.row_number().over(w))
-    .where(F.col("_rn") == 1)
-    .drop("_rn")
+expected, _, contract_report = CONTRACTS.validate_snapshot_history(
+    VALIDATOR,
+    transformar(batch),
+    ["id"],
 )
+CONTRACTS.log_report("validate:venda", contract_report)
 
 actual = spark.table(SILVER)
 
