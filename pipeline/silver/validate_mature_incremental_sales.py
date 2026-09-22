@@ -1,7 +1,7 @@
 # Databricks notebook source
 # pipeline/silver/validate_mature_incremental_sales.py
 # Gate D7C — valida somente o lote maduro novo de venda antes do commit.
-# Expected e runtime usam o mesmo contract engine canônico.
+# Expected e runtime usam os mesmos engines canônicos de Drift + Contracts.
 
 from functools import reduce
 import importlib.util
@@ -21,6 +21,7 @@ BUNDLE_FILES_PATH = job_param(
     "bundle_files_path",
     "/Workspace/Users/<USER>/varejinho-data-platform",
 )
+CONTROL_ROOT = job_param("control_root", "s3://varejinho-lake/_control/dev")
 CONTROL_TABLE = job_param("control_table", f"{CATALOG}.control.fact_watermark")
 BRONZE = job_param("bronze_table", f"{CATALOG}.bronze.venda")
 SILVER = job_param("silver_table", f"{CATALOG}.silver.venda")
@@ -46,6 +47,21 @@ CONTRACTS = SilverContractRuntime(
     bundle_files_path=BUNDLE_FILES_PATH,
 )
 VALIDATOR = CONTRACTS.validator("venda", ["id"])
+
+DRIFT_RUNTIME_PATH = f"{BUNDLE_FILES_PATH}/quality/schema_drift_runtime.py"
+_drift_spec = importlib.util.spec_from_file_location(
+    "varejinho_schema_drift_runtime_validate_sales", DRIFT_RUNTIME_PATH
+)
+if _drift_spec is None or _drift_spec.loader is None:
+    raise ImportError(f"Não foi possível carregar schema drift runtime: {DRIFT_RUNTIME_PATH}")
+_drift_module = importlib.util.module_from_spec(_drift_spec)
+_drift_spec.loader.exec_module(_drift_module)
+SilverSchemaDriftRuntime = _drift_module.SilverSchemaDriftRuntime
+DRIFT = SilverSchemaDriftRuntime(
+    dbutils=dbutils,
+    control_root=CONTROL_ROOT,
+    bundle_files_path=BUNDLE_FILES_PATH,
+)
 
 
 def transformar(df):
@@ -97,9 +113,11 @@ if committed is not None:
     batch = batch.filter(F.col("ingestion_date") > F.lit(committed))
 batch = batch.filter(F.col("ingestion_date") <= F.lit(candidate))
 
+typed_batch = transformar(batch)
+accepted_batch, drift_report = DRIFT.evaluate("venda", typed_batch)
 expected, _, contract_report = CONTRACTS.validate_snapshot_history(
     VALIDATOR,
-    transformar(batch),
+    accepted_batch,
     ["id"],
 )
 CONTRACTS.log_report("validate:venda", contract_report)
@@ -163,6 +181,7 @@ ok = (
 print("\n=== D7C — VALIDATE MATURE VENDA INCREMENTAL ===")
 print(f"committed:          {committed}")
 print(f"candidate:          {candidate}")
+print(f"drift:              {drift_report['classification']}")
 print(f"batch expected rows:{expected.count():,}")
 print(f"Silver total rows:  {actual.count():,}")
 print(f"schema exact:       {schema_ok}")
