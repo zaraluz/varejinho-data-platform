@@ -5,13 +5,13 @@
 # Regras:
 # - lê somente (committed, mature_cutoff]
 # - nunca consome a partição ainda aberta
+# - Schema Drift canônico antes de Contracts/MERGE
 # - MERGE por id: update + insert, sem delete por ausência
 # - grava candidate=PENDING_VALIDATION; commit ocorre em task separada
 # - Data Contracts via engine canônico em quality/contract_engine.py
 
 from datetime import date
 import importlib.util
-import json
 
 from delta.tables import DeltaTable
 from pyspark.sql import functions as F
@@ -44,7 +44,6 @@ HISTORY = job_param(
     "quarantine_history_table",
     f"{CATALOG}.silver._quarantine_history_venda",
 )
-REGISTRY = f"{CONTROL_ROOT}/schema_registry"
 
 if not CATALOG.endswith("_dev"):
     raise Exception(
@@ -66,6 +65,21 @@ CONTRACTS = SilverContractRuntime(
     bundle_files_path=BUNDLE_FILES_PATH,
 )
 VALIDATOR = CONTRACTS.validator("venda", ["id"])
+
+DRIFT_RUNTIME_PATH = f"{BUNDLE_FILES_PATH}/quality/schema_drift_runtime.py"
+_drift_spec = importlib.util.spec_from_file_location(
+    "varejinho_schema_drift_runtime_sales", DRIFT_RUNTIME_PATH
+)
+if _drift_spec is None or _drift_spec.loader is None:
+    raise ImportError(f"Não foi possível carregar schema drift runtime: {DRIFT_RUNTIME_PATH}")
+_drift_module = importlib.util.module_from_spec(_drift_spec)
+_drift_spec.loader.exec_module(_drift_module)
+SilverSchemaDriftRuntime = _drift_module.SilverSchemaDriftRuntime
+DRIFT = SilverSchemaDriftRuntime(
+    dbutils=dbutils,
+    control_root=CONTROL_ROOT,
+    bundle_files_path=BUNDLE_FILES_PATH,
+)
 
 
 def latest_mature_partition():
@@ -93,44 +107,6 @@ def latest_mature_partition():
         .filter(F.col("min_modified_date") > F.col("ingestion_date"))
         .agg(F.max("ingestion_date").alias("mature_cutoff"))
         .collect()[0]["mature_cutoff"]
-    )
-
-
-def detectar_drift(df):
-    schema_atual = {f.name: f.dataType.simpleString() for f in df.schema.fields}
-    registry_file = f"{REGISTRY}/venda.json"
-
-    try:
-        anterior = json.loads(dbutils.fs.head(registry_file))
-    except Exception:
-        dbutils.fs.put(
-            registry_file,
-            json.dumps(schema_atual),
-            overwrite=True,
-        )
-        print(f"[venda] Schema baseline criado em {registry_file}")
-        return
-
-    novas = sorted(set(schema_atual) - set(anterior))
-    removidas = sorted(set(anterior) - set(schema_atual))
-    alteradas = {
-        c: {"antes": anterior[c], "depois": schema_atual[c]}
-        for c in set(schema_atual) & set(anterior)
-        if anterior[c] != schema_atual[c]
-    }
-
-    if novas or removidas or alteradas:
-        print(
-            f"[DRIFT] venda: novas={novas} removidas={removidas} "
-            f"alteradas={alteradas}"
-        )
-    else:
-        print("[venda] Schema sem alterações.")
-
-    dbutils.fs.put(
-        registry_file,
-        json.dumps(schema_atual),
-        overwrite=True,
     )
 
 
@@ -263,17 +239,19 @@ if not snapshots:
 
 typed = transformar(pending)
 
+# Schema Drift vem antes de Contracts/MERGE:
+# - additive permitido é registrado e projetado para o baseline aceito;
+# - breaking drift persiste evento e bloqueia antes de qualquer mutação Silver.
+typed_accepted, drift_report = DRIFT.evaluate("venda", typed)
+
 # Valida todo o lote maduro. Unicidade é por id+snapshot; depois escolhemos
 # o último estado VÁLIDO por id, preservando update/insert/quarantine históricos.
 source, invalid, contract_report = CONTRACTS.validate_snapshot_history(
     VALIDATOR,
-    typed,
+    typed_accepted,
     ["id"],
 )
 CONTRACTS.log_report("venda", contract_report)
-
-# Só atualizamos o baseline de drift após o contrato estrutural passar.
-detectar_drift(typed)
 
 (
     DeltaTable.forName(spark, SILVER).alias("t")
@@ -320,6 +298,7 @@ if (
 
 print(
     f"✅ APPLY venda concluído | snapshots={len(snapshots)} "
+    f"| drift={drift_report['classification']} "
     f"| contract rows={contract_report['total']:,} "
     f"| source final={source.count():,} | quarantine={invalid_count:,}"
 )
