@@ -174,6 +174,24 @@ Do not reopen fact maturity gates unless a measurable regression appears. Contra
 
 ---
 
+## 2026-09-21 — The first known SCD2 boundary is evidence-based, not synthetic history
+
+**Decision**
+For the initial known SCD2 version:
+- `produto` uses `datacadastro` when reliable;
+- `fornecedor` uses `datacadastro` when reliable;
+- `mercadologico`, which has no trustworthy source timestamp, starts at the first observed ingestion date.
+
+For later product changes, `dataalteracao` is used when reliable; supplier and merchandise hierarchy changes fall back to observed snapshot/ingestion time when the source does not expose a trustworthy change timestamp.
+
+**Why**
+The original initial load used `current_timestamp()`, which made historical facts precede every dimension version. Backdating the first known version to a trustworthy source timestamp repairs that load-boundary defect, but it does not magically reconstruct dimension history that the source never supplied.
+
+**Consequence**
+`valid_from` expresses the earliest defensible known boundary. It must not be moved further into the past merely to make every historical fact join successfully.
+
+---
+
 ## 2026-09-21 — Gold historical facts must use the dimension version valid at the business event date
 
 **Decision**
@@ -204,6 +222,19 @@ The missing historical coverage is a source-history limitation, not evidence tha
 
 **Consequence**
 Gold quality checks distinguish explainable `before_first` gaps from unexpected temporal gaps. G3-style attempts to “fix” Silver history only to make every Gold join resolve are explicitly rejected.
+
+---
+
+## 2026-09-21 — Gold profiling may diagnose temporal coverage but must not become a second Silver audit
+
+**Decision**
+Use G1/G2 to prove the behavior of temporal joins and diagnose coverage boundaries, but do not reopen already-proven Silver SCD2 semantics without new contradictory evidence. The proposed G3 policy-impact profiler was removed once it became clear it would duplicate questions already settled in Silver.
+
+**Why**
+Gold owns **consumption** of SCD2 history; Silver owns **construction** of that history. Re-auditing `valid_from`, Type 1/2, watermark and replay inside Gold would blur ownership and create repeated work without a new failure mode.
+
+**Consequence**
+Gold temporal work is closed by proving correct fact-to-version mapping. Source-history limitations remain documented as limitations rather than being “fixed” downstream.
 
 ---
 
@@ -240,6 +271,21 @@ The project does not claim “37/37 full contracts”; it documents differentiat
 
 ---
 
+## 2026-09-22 — Contracts describe the Silver interface that actually exists
+
+**Decision**
+Canonical YAML contracts must reflect the physical schema that the current Silver runtime actually produces. Contracts are not used to silently impose “better-looking” types, rename columns, or hide transformation changes.
+
+Logical table/reference names are environment-independent (`table: venda`, `references: produto.id`); the runtime resolves `catalog` and `schema`.
+
+**Why**
+During C1, every existing contract had a type mismatch and several had stale columns or malformed decimal declarations. Enabling strict enforcement against aspirational schemas would have made the contract system itself the source of failures.
+
+**Consequence**
+A future change such as converting an ID from `string` to `int` must be implemented and tested as a Silver transformation/evolution change first, then reflected in the contract. It cannot be smuggled into production by editing YAML alone.
+
+---
+
 ## 2026-09-22 — Snapshot uniqueness is scoped to `ingestion_date`
 
 **Decision**
@@ -250,6 +296,21 @@ Global uniqueness across snapshot history incorrectly quarantines valid state ev
 
 **Consequence**
 The contract runtime validates uniqueness with `uniqueness_scope=[ingestion_date]` before selecting the latest valid state per grain.
+
+---
+
+## 2026-09-22 — Contract row rules are enforced in APPLY; the Silver Quality Gate re-proves structure, not the entire dataset
+
+**Decision**
+- Row-level contract rules are enforced in the active APPLY runtime and violations are persisted to quarantine/reporting.
+- The Silver Quality Gate revalidates the **structural contract** of the 20 `critical/high` entities and the availability of the 17 `standard` entities.
+- The QG does not re-run every row-level rule over every full Silver table simply to duplicate APPLY behavior.
+
+**Why**
+A second full scan would create a parallel contract implementation in practice and add significant cost on large tables such as stock movement, without improving ownership clarity.
+
+**Consequence**
+The gate hierarchy is explicit: APPLY owns row-level enforcement, VALIDATE proves the candidate state, and Silver QG proves committed-state alignment plus structural contract integrity.
 
 ---
 
@@ -381,3 +442,16 @@ Star Schema and Data Vault optimize different layers and goals. For this platfor
 
 **Consequence**
 Data Vault remains optional P2 learning work and must not distract from correctness/release gates.
+
+---
+
+## 2026-09-22 — The README is a public snapshot of validated state, not a marketing claim of future work
+
+**Decision**
+The repository README documents what has been proven on `feature/platform-hardening` and clearly labels Schema Drift, dbt hardening and the Release Gate as unfinished work.
+
+**Why**
+The repository is intended to function as technical portfolio evidence. Credibility is stronger when validated behavior, known limitations and open work are separated explicitly instead of presenting the target architecture as if it already existed.
+
+**Consequence**
+README updates should follow major validated gates. Pending architecture remains in the roadmap until an execution gate closes it.
