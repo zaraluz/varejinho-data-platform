@@ -1,0 +1,383 @@
+# Decision Log — Varejinho Data Platform
+
+This file records architectural and operational decisions already made during the hardening of the platform. It is intentionally decision-oriented: what was decided, why, and what that implies for future work.
+
+> Current release state: all decisions below apply to `feature/platform-hardening` / `--target dev` unless explicitly stated otherwise. `main` and production are not yet the source of truth for the hardened architecture.
+
+## 2026-09-17 — Dev isolation uses a shared raw Bronze and isolated Silver/Gold
+
+**Decision**
+- Keep `varejinho` as the single owner of the physical Bronze external tables.
+- Expose Bronze in `varejinho_dev` through read-only views.
+- Keep `varejinho_dev.silver` and `varejinho_dev.gold` physically isolated.
+
+**Why**
+Unity Catalog does not allow registering the same physical external path twice (`LOCATION_OVERLAP`). Duplicating raw files only to simulate dev would add cost and create a second source of truth.
+
+**Consequence**
+Development can read the same raw source while all transformed state remains isolated. Environment separation is a catalog/runtime concern, not a duplicate-raw-data concern.
+
+---
+
+## 2026-09-17 — Product, supplier and merchandise hierarchy are owned by the SCD2 runtime
+
+**Decision**
+- `produto`, `fornecedor` and `mercadologico` are handled only by `incremental_scd2.py`.
+- Reference/SCD1 dimensions stay in `transform_reference_dimensions.py`.
+- The legacy `transform_dimensions.py` is not allowed to own those SCD2 entities in the official DAG.
+
+**Why**
+A DROP/rebuild of the latest snapshot is not SCD Type 2 even if columns such as `valid_from` and `is_current` exist. History must be persisted and replay-safe.
+
+**Consequence**
+The three historical dimensions have explicit version ownership, watermarks and validation before commit.
+
+---
+
+## 2026-09-17 — Type 1 / Type 2 semantics are business decisions, not “all changed columns become history”
+
+**Decision**
+- Product: structural/analytical identity attributes are Type 2; descriptive/current-state attributes such as `descricaoreduzida` are Type 1.
+- Supplier: `cnpj` and `razaosocial` are Type 2; operational/descriptive attributes are Type 1.
+- Merchandise hierarchy: hierarchy/path movement is Type 2; `descricao` is Type 1.
+
+**Why**
+A new historical version is justified only when an old fact must continue seeing the old attribute value.
+
+**Consequence**
+SCD2 is treated as a modeling contract about historical meaning, not a generic SQL pattern.
+
+---
+
+## 2026-09-17 — SCD2 reappearance is fail-fast until a business policy exists
+
+**Decision**
+If an ID disappears from a snapshot and later reappears, the runtime raises an error instead of inventing a reactivation rule.
+
+**Why**
+Reappearance could mean reactivation, extraction defect, source cleanup, or identity reuse. Those meanings are not interchangeable.
+
+**Consequence**
+The pipeline prefers an explicit failure over silently manufacturing historical semantics. Reappearance policy remains a Release Gate edge case.
+
+---
+
+## 2026-09-18 — Fact watermark writes are serialized
+
+**Decision**
+Serialize fact/SCD2 chains that write to the same control table instead of parallelizing all commits.
+
+**Why**
+The small execution-time gain from parallel control-table writes is not worth increasing Delta write-conflict risk and operational blast radius.
+
+**Consequence**
+The official DAG favors deterministic state transitions over maximum task parallelism.
+
+---
+
+## 2026-09-18 — Absence from a later snapshot is not a business delete
+
+**Decision**
+Silver fact MERGEs perform update/insert only. Missing keys in a later source snapshot do not trigger deletes.
+
+**Why**
+The available source does not provide a trustworthy delete event. Treating absence as deletion would conflate extraction behavior with business state.
+
+**Consequence**
+Historical keys remain in Silver unless a future explicit delete semantic is introduced.
+
+---
+
+## 2026-09-21 — Daily partition existence does not mean daily partition maturity
+
+**Decision**
+A fact partition `D` is processable only when all currently visible files for `D` have a `file_modification_time` date later than `D`.
+
+`mature_cutoff = max(ingestion_date where min(file_modification_date) > ingestion_date)`
+
+Silver processes only:
+
+`committed < ingestion_date <= mature_cutoff`
+
+**Why**
+Profiling proved that a folder for day `D` can exist while still being written and normally finalizes in `D+1`. Reading it merely because the folder exists moved open-partition rows into Silver.
+
+**Consequence**
+The platform has an explicit physical-readiness boundary rather than using visible Bronze max date as a transactional watermark.
+
+---
+
+## 2026-09-21 — Immutable Bronze / run identity is a fallback, not the active architecture
+
+**Decision**
+Keep the current Pentaho → S3 daily-partition landing architecture while the observed D+1 maturity invariant holds. Escalate to immutable object keys / batch identity only if evidence shows writes after the accepted maturity boundary or the current contract becomes unreliable.
+
+**Why**
+D5C showed all profiled fact tables compatible with the D+1 closure rule and no file modified after D+1 in the observed history.
+
+**Consequence**
+Do not redesign Bronze merely because an immutable-batch architecture is theoretically stronger. A post-commit mutation guard is still required before production release.
+
+---
+
+## 2026-09-21 — Fact state advances only through APPLY → VALIDATE → COMMIT
+
+**Decision**
+- APPLY may write Silver and sets `candidate_snapshot`.
+- VALIDATE proves the new mature batch.
+- COMMIT promotes the candidate to `last_processed_snapshot` only after validation succeeds.
+
+**Why**
+A successful write is not proof that the resulting state is correct. Watermark movement must represent a validated state transition.
+
+**Consequence**
+A failed validator does not falsely advance ingestion state, and retries can resume from an explicit pending state.
+
+---
+
+## 2026-09-21 — Repair contaminated fact baselines narrowly, not through blind full rebuilds
+
+**Decision**
+Repair only the affected maturity window / contaminated keys, preserve earlier valid history, validate, and only then realign the watermark.
+
+**Why**
+The defect was premature consumption of an open partition, not evidence that all prior Silver history was invalid.
+
+**Consequence**
+Repairs minimize blast radius and retain auditability through control/audit tables and Delta history.
+
+---
+
+## 2026-09-21 — `venda` follows the same maturity contract as the other 13 facts
+
+**Decision**
+Replace legacy full-scan `transform_sales.py` with `incremental_sales.py` using D+1 maturity, watermark and APPLY → VALIDATE → COMMIT.
+
+**Why**
+Real-data profiling proved `venda` had the same D+1 physical behavior and that its open partition had prematurely overwritten 6,802 existing IDs.
+
+**Consequence**
+All 14 Silver facts share the same incremental operating model. `transform_sales.py` was removed from the feature branch after real replay/equivalence tests passed.
+
+---
+
+## 2026-09-21 — Silver Facts are closed on incremental correctness, but Silver-wide hardening remains separate
+
+**Decision**
+Treat D7E as closure of the **Silver Facts incremental/maturity** workstream after the official dev pipeline passed Silver and Gold quality gates.
+
+**Why**
+Incrementality, maturity, replay and watermark semantics were proven independently from cross-cutting concerns such as contracts and schema drift.
+
+**Consequence**
+Do not reopen fact maturity gates unless a measurable regression appears. Contracts/drift are separate platform hardening concerns.
+
+---
+
+## 2026-09-21 — Gold historical facts must use the dimension version valid at the business event date
+
+**Decision**
+Use these temporal mappings:
+- `fato_compras → dim_produto` by `datacompra`
+- `fato_compras → dim_fornecedor` by `datacompra`
+- `fato_promocoes → dim_produto` by `datainicio`
+- `fato_contas_pagar → dim_fornecedor` by `dataemissao`
+- `fato_outras_despesas → dim_fornecedor` by `dataemissao`
+
+Existing facts already using justified temporal joins keep them.
+
+**Why**
+SCD2 only creates value if historical facts resolve to the dimension version that represented the event when it happened. The event date was chosen from business semantics, not from whichever date is convenient for partitioning.
+
+**Consequence**
+The previous `is_current=true` mappings for those relationships were replaced by interval joins (`event_ts >= valid_from` and `event_ts < valid_to`).
+
+---
+
+## 2026-09-21 — Temporal rows before the first known dimension version stay unresolved
+
+**Decision**
+If a fact occurs before the earliest historical version preserved for a dimension key, keep the `LEFT JOIN` result unresolved (`NULL`) instead of forcing a current-version fallback or rewriting `valid_from`.
+
+**Why**
+The missing historical coverage is a source-history limitation, not evidence that the current dimension value was true in the past.
+
+**Consequence**
+Gold quality checks distinguish explainable `before_first` gaps from unexpected temporal gaps. G3-style attempts to “fix” Silver history only to make every Gold join resolve are explicitly rejected.
+
+---
+
+## 2026-09-22 — Data contracts use one canonical engine with explicit severity behavior
+
+**Decision**
+`quality/contract_engine.py` + `quality/contract_runtime.py` are the canonical contract implementation for active Silver runtimes.
+
+Policy:
+- structural/dataset-level contract failure → **FAIL CLOSED**
+- row-level `error` violation → **QUARANTINE**
+- `warning` → record/report without blocking
+- mandatory contract missing → **FAIL CLOSED**
+
+**Why**
+A YAML is not a contract unless the declared interface is executable and interpreted identically by APPLY, VALIDATE and the Quality Gate.
+
+**Consequence**
+Inline/fail-open contract copies were removed from active incremental facts/sales paths. The same runtime semantics are reused across processing and validation.
+
+---
+
+## 2026-09-22 — Contract strength is proportional to data-product criticality
+
+**Decision**
+- 20 `critical/high` Silver entities have executable contracts.
+- 17 `standard` entities intentionally use a simpler availability/structural gate rather than full YAML contracts.
+
+**Why**
+Forcing identical governance overhead onto every lookup table would add maintenance cost without equivalent risk reduction.
+
+**Consequence**
+The project does not claim “37/37 full contracts”; it documents differentiated controls by criticality.
+
+---
+
+## 2026-09-22 — Snapshot uniqueness is scoped to `ingestion_date`
+
+**Decision**
+For current-state snapshot sources, the same business key on different ingestion dates is a legitimate update. A duplicate of the same key within the same `ingestion_date` is a true duplicate.
+
+**Why**
+Global uniqueness across snapshot history incorrectly quarantines valid state evolution.
+
+**Consequence**
+The contract runtime validates uniqueness with `uniqueness_scope=[ingestion_date]` before selecting the latest valid state per grain.
+
+---
+
+## 2026-09-22 — Schema drift detection and schema evolution are separate decisions
+
+**Decision**
+The next hardening block must not automatically overwrite the accepted schema baseline when drift is detected.
+
+Target policy:
+- detect and persist drift event
+- classify (`additive`, `removed_column`, `type_change`, other breaking)
+- apply policy by criticality
+- promote a new baseline only after an explicit accepted evolution decision
+
+**Why**
+Observation that the schema changed is not permission for that new interface to become trusted Silver schema.
+
+**Consequence**
+The current `schema_drift.py` behavior that always overwrites the registry is considered technical debt and is the next canonical engineering block.
+
+---
+
+## 2026-09-22 — dbt documents/tests externally built Gold unless ownership moves to dbt
+
+**Decision**
+Current ownership remains: pipeline PySpark/SQL materializes Gold; dbt tests/documents it.
+
+Therefore the dbt hardening must represent Gold as `sources` rather than pretending externally materialized relations are dbt models. Power BI becomes a dbt `exposure` when reconnected.
+
+**Why**
+Lineage and contracts must describe real ownership. Declaring a table as a dbt model does not make dbt its materialization owner.
+
+**Consequence**
+No migration of Gold ownership to dbt is implied by the dbt cleanup block. Such a migration would require a separate architectural decision.
+
+---
+
+## 2026-09-22 — `main` is a release boundary; production promotion waits for a Release Gate
+
+**Decision**
+Keep hardening in `feature/platform-hardening` / dev until the agreed core blocks are closed. Do not merge partial hardening into `main` simply because an individual gate passes.
+
+Release sequence:
+1. complete Schema Drift
+2. complete dbt hardening
+3. run Release Gate
+4. review full feature vs `main` diff
+5. remove/parameterize dev-only guards and legacy/experimental runtime references
+6. validate bundles for dev and prod
+7. ensure prod schedules remain `PAUSED`
+8. PR + merge to `main`
+9. manual prod deploy while paused
+10. controlled production smoke test + quality gates
+11. only then unpause schedules
+
+**Why**
+In the current repository, `main` is too close to the production release boundary to use it as an integration playground.
+
+**Consequence**
+Merge to `main` and activation of production schedules are separate approvals.
+
+---
+
+## 2026-09-22 — D+1 needs a post-commit mutation guard before production release
+
+**Decision**
+Before the Release Gate is passed, committed daily partitions must gain an auditable fingerprint/manifest (for example path, size, modification time and/or row-count/hash evidence) so later mutation of an already committed partition is detected.
+
+**Why**
+D+1 is strongly evidenced but still an operational assumption. A senior production design should detect when that assumption stops being true.
+
+**Consequence**
+A late mutation after commit becomes an explicit failure/alert instead of silently escaping the forward-only watermark.
+
+---
+
+## 2026-09-22 — Performance changes require measurement first
+
+**Decision**
+Do not migrate Gold to incremental processing, liquid clustering, or another storage/layout strategy merely because it is newer.
+
+Measure first:
+- full Gold rebuild duration/cost
+- mature-cutoff discovery cost
+- actual query/filter patterns
+- current `PARTITION + ZORDER` behavior vs alternatives where relevant
+
+**Why**
+Correctness and simple reproducibility currently have higher value than speculative optimization.
+
+**Consequence**
+Performance work remains a benchmark-driven P2 task, not a prerequisite for the current correctness hardening.
+
+---
+
+## 2026-09-22 — Athena/Glue partition discovery is separate from Databricks maturity
+
+**Decision**
+Automate Athena partition discovery later through a scheduled Glue Crawler or evaluate Athena Partition Projection. Do not treat `MSCK REPAIR TABLE` as a permanent manual operating step.
+
+**Why**
+Athena/Glue catalog registration and Databricks physical-file maturity solve different problems. The current Databricks mature-cutoff logic reads physical files and `_metadata.file_modification_time` independently of Athena partition registration.
+
+**Consequence**
+AWS catalog automation cannot block current Databricks hardening unless the physical S3 file itself is missing.
+
+---
+
+## 2026-09-22 — Accuracy proof precedes BI reconnection
+
+**Decision**
+Before treating the analytical platform as finished for consumers, reconcile ERP/source metrics against Gold using independently calculated counts/financial metrics. Reconnect Power BI only after core quality/reconciliation work is closed.
+
+**Why**
+Schema checks, uniqueness and RI prove validity/consistency; they do not prove that analytical values match the business source of truth.
+
+**Consequence**
+ERP × Gold reconciliation is the main remaining accuracy gate. Genie and Power BI remain downstream validation/consumption steps, not substitutes for source reconciliation.
+
+---
+
+## 2026-09-22 — Data Vault is an optional learning slice, not a production requirement
+
+**Decision**
+Do not replace the Gold Star Schema with Data Vault just to demonstrate the pattern. If implemented, keep it as a small auditable learning case where lineage/history benefits justify it.
+
+**Why**
+Star Schema and Data Vault optimize different layers and goals. For this platform, forcing Data Vault into the serving layer would increase complexity without solving a current problem.
+
+**Consequence**
+Data Vault remains optional P2 learning work and must not distract from correctness/release gates.
