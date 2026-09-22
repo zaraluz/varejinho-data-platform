@@ -59,7 +59,6 @@ class ContractValidator:
         self.columns = self.contract.get("columns", []) or []
         self.rules = self.contract.get("quality_rules", []) or []
         self.grain = self.contract.get("grain", []) or []
-
         self._validate_contract_definition()
 
     def _validate_contract_definition(self) -> None:
@@ -196,6 +195,21 @@ class ContractValidator:
             F.count(F.lit(1)).over(Window.partitionBy(*key)) > 1,
         )
 
+    @staticmethod
+    def _scoped_key(key: List[str], uniqueness_scope: List[str]) -> List[str]:
+        out = list(key)
+        for col in uniqueness_scope:
+            if col not in out:
+                out.append(col)
+        return out
+
+    @staticmethod
+    def _duplicate_detail(key: List[str], uniqueness_scope: List[str]) -> str:
+        base = ",".join(key)
+        if uniqueness_scope:
+            return f"{base}|scope={','.join(uniqueness_scope)}"
+        return base
+
     def _resolve_reference(self, reference: str) -> Tuple[str, str]:
         parts = str(reference).split(".")
         if len(parts) != 2 or not all(parts):
@@ -218,17 +232,27 @@ class ContractValidator:
         self,
         df: DataFrame,
         reference_time: Optional[datetime] = None,
+        uniqueness_scope: Optional[List[str]] = None,
     ) -> Tuple[DataFrame, DataFrame, Dict]:
         """
-        Valida um lote já transformado/tipado.
+        Valida um DataFrame já transformado/tipado.
 
-        Retorna:
-          (df_valid, df_quarantine, report)
+        uniqueness_scope permite validar histórico de snapshots sem tratar a
+        repetição natural do mesmo grain entre dias como duplicata. Exemplo:
+        grain=[id], uniqueness_scope=[ingestion_date] => unicidade por
+        (id, ingestion_date). Sem scope, a regra vale para o DataFrame inteiro.
 
+        Retorna (df_valid, df_quarantine, report).
         FAIL CLOSED ocorre via ContractViolation para erros estruturais e para
         regras dataset-level severity=error (ex.: freshness).
         """
         self._validate_dataframe_schema(df)
+        scope = list(uniqueness_scope or [])
+        missing_scope = sorted(set(scope) - set(df.columns))
+        if missing_scope:
+            raise ContractViolation(
+                f"{self.table}: uniqueness_scope referencia colunas ausentes: {missing_scope}"
+            )
 
         work = (
             df.withColumn("_contract_invalid", F.lit(False))
@@ -295,15 +319,17 @@ class ContractValidator:
                 )
 
             if bool(cfg.get("unique", False)) and (name,) not in explicit_duplicate_keys:
+                base_key = [name]
+                scoped_key = self._scoped_key(base_key, scope)
                 token = f"_contract_dup_col_{idx}"
-                work = self._with_duplicate_flag(work, [name], token)
+                work = self._with_duplicate_flag(work, scoped_key, token)
                 work = self._record_condition(
                     work,
                     F.col(token),
                     "no_duplicates",
                     "error",
                     report_rows,
-                    name,
+                    self._duplicate_detail(base_key, scope),
                 ).drop(token)
 
         for idx, rule in enumerate(self.rules):
@@ -341,15 +367,16 @@ class ContractValidator:
                     raise ContractViolation(
                         f"{self.table}: no_duplicates referencia colunas ausentes: {missing}"
                     )
+                scoped_key = self._scoped_key(key, scope)
                 token = f"_contract_dup_rule_{idx}"
-                work = self._with_duplicate_flag(work, key, token)
+                work = self._with_duplicate_flag(work, scoped_key, token)
                 work = self._record_condition(
                     work,
                     F.col(token),
                     rule_name,
                     severity,
                     report_rows,
-                    ",".join(key),
+                    self._duplicate_detail(key, scope),
                 ).drop(token)
 
             elif rule_name == "referential_integrity":
@@ -396,7 +423,9 @@ class ContractValidator:
 
                 max_ts = work.agg(F.max(F.col(column)).alias("max_ts")).collect()[0]["max_ts"]
                 now = reference_time or datetime.now(timezone.utc).replace(tzinfo=None)
-                stale = max_ts is None or ((now - max_ts).total_seconds() / 3600.0 > float(max_age_hours))
+                stale = max_ts is None or (
+                    (now - max_ts).total_seconds() / 3600.0 > float(max_age_hours)
+                )
                 report_rows.append(
                     {
                         "rule": rule_name,
@@ -440,5 +469,4 @@ class ContractValidator:
             "errors": errors,
             "rules": report_rows,
         }
-
         return valid, quarantine, report
