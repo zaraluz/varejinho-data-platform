@@ -23,6 +23,12 @@ SchemaDriftEngine = _engine.SchemaDriftEngine
 SchemaDriftViolation = _engine.SchemaDriftViolation
 
 
+# SCD2 intentionally materializes only part of the Bronze payload plus technical
+# history columns. For these entities, drift is defined on the Silver output
+# shape, not on every upstream column present in Bronze.
+SCD2_SILVER_SHAPED_ENTITIES = {"produto", "fornecedor", "mercadologico"}
+
+
 class SilverSchemaDriftRuntime:
     """Runtime canônico de drift para a Silver.
 
@@ -73,10 +79,27 @@ class SilverSchemaDriftRuntime:
             )
         return tier
 
+    def _silver_shaped_projection(self, entity: str, df: DataFrame) -> DataFrame:
+        """Project intentional SCD2 source supersets onto the accepted Silver shape.
+
+        Extra Bronze columns are not Silver schema drift because the SCD2 runtime
+        never materializes them. Baseline columns that disappear are intentionally
+        left absent so the engine still classifies them as removed_column; common
+        columns keep their observed Spark types so type_change remains detectable.
+        """
+        if entity not in SCD2_SILVER_SHAPED_ENTITIES:
+            return df
+
+        _, baseline_meta = self.engine.load_baseline(entity)
+        baseline_columns = list(baseline_meta.get("columns", []))
+        present_baseline_columns = [c for c in baseline_columns if c in df.columns]
+        return df.select(*present_baseline_columns)
+
     def evaluate(self, entity: str, df: DataFrame):
+        observed = self._silver_shaped_projection(entity, df)
         accepted, report = self.engine.evaluate(
             entity,
-            df,
+            observed,
             tier=self.tier(entity),
         )
         self.log_report(entity, report)
