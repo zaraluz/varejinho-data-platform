@@ -5,17 +5,16 @@
 # Regras:
 # - lê somente (committed, mature_cutoff]
 # - nunca consome a partição ainda aberta
-# - aplica a mesma transformação/contrato do transform_sales.py legado
 # - MERGE por id: update + insert, sem delete por ausência
 # - grava candidate=PENDING_VALIDATION; commit ocorre em task separada
+# - Data Contracts via engine canônico em quality/contract_engine.py
 
 from datetime import date
+import importlib.util
 import json
-import yaml
 
 from delta.tables import DeltaTable
 from pyspark.sql import functions as F
-from pyspark.sql.window import Window
 
 
 def job_param(nome: str, default: str) -> str:
@@ -45,13 +44,28 @@ HISTORY = job_param(
     "quarantine_history_table",
     f"{CATALOG}.silver._quarantine_history_venda",
 )
-CONTRACT = f"{BUNDLE_FILES_PATH}/contracts/silver/venda.yaml"
 REGISTRY = f"{CONTROL_ROOT}/schema_registry"
 
 if not CATALOG.endswith("_dev"):
     raise Exception(
         f"incremental_sales só pode executar em *_dev durante hardening. Recebido: {CATALOG}"
     )
+
+CONTRACT_RUNTIME_PATH = f"{BUNDLE_FILES_PATH}/quality/contract_runtime.py"
+_runtime_spec = importlib.util.spec_from_file_location(
+    "varejinho_contract_runtime", CONTRACT_RUNTIME_PATH
+)
+if _runtime_spec is None or _runtime_spec.loader is None:
+    raise ImportError(f"Não foi possível carregar contract runtime: {CONTRACT_RUNTIME_PATH}")
+_contract_runtime_module = importlib.util.module_from_spec(_runtime_spec)
+_runtime_spec.loader.exec_module(_contract_runtime_module)
+SilverContractRuntime = _contract_runtime_module.SilverContractRuntime
+CONTRACTS = SilverContractRuntime(
+    spark=spark,
+    catalog=CATALOG,
+    bundle_files_path=BUNDLE_FILES_PATH,
+)
+VALIDATOR = CONTRACTS.validator("venda", ["id"])
 
 
 def latest_mature_partition():
@@ -177,66 +191,6 @@ def transformar(df):
     )
 
 
-def aplicar_contrato(df):
-    with open(CONTRACT, "r") as f:
-        contract = yaml.safe_load(f)
-
-    work = (
-        df.withColumn("_invalido", F.lit(False))
-          .withColumn("_motivo", F.lit(""))
-    )
-
-    for cfg in contract.get("columns", []):
-        name = cfg.get("name")
-        if name not in work.columns:
-            continue
-
-        if not cfg.get("nullable", True):
-            work = (
-                work.withColumn(
-                    "_invalido",
-                    F.when(F.col(name).isNull(), True)
-                     .otherwise(F.col("_invalido")),
-                )
-                .withColumn(
-                    "_motivo",
-                    F.when(
-                        F.col(name).isNull(),
-                        F.concat(F.col("_motivo"), F.lit(f"|{name} nulo")),
-                    ).otherwise(F.col("_motivo")),
-                )
-            )
-
-        min_val = cfg.get("min")
-        if min_val is not None:
-            try:
-                min_num = float(min_val)
-                work = (
-                    work.withColumn(
-                        "_invalido",
-                        F.when(F.col(name).cast("double") < min_num, True)
-                         .otherwise(F.col("_invalido")),
-                    )
-                    .withColumn(
-                        "_motivo",
-                        F.when(
-                            F.col(name).cast("double") < min_num,
-                            F.concat(
-                                F.col("_motivo"),
-                                F.lit(f"|{name} < {min_val}"),
-                            ),
-                        ).otherwise(F.col("_motivo")),
-                    )
-                )
-            except (TypeError, ValueError):
-                pass
-
-    return (
-        work.where(~F.col("_invalido")).drop("_invalido", "_motivo"),
-        work.where(F.col("_invalido")).drop("_invalido"),
-    )
-
-
 if not spark.catalog.tableExists(BRONZE):
     raise Exception(f"Bronze venda ausente: {BRONZE}")
 if not spark.catalog.tableExists(SILVER):
@@ -257,7 +211,6 @@ committed = state["last_processed_snapshot"]
 candidate = state["candidate_snapshot"]
 status = state["status"]
 
-# Resume seguro depois de eventual falha no validator.
 if status == "PENDING_VALIDATION" and candidate is not None:
     print(
         f"ℹ️ venda: candidate={candidate} já PENDING_VALIDATION. "
@@ -308,31 +261,18 @@ if not snapshots:
     print("✅ venda: nenhum snapshot maduro pendente; no-op.")
     dbutils.notebook.exit("NO_PENDING_MATURE_SNAPSHOT")
 
-null_ids = pending.filter(F.col("id").isNull()).count()
-if null_ids:
-    raise Exception(f"venda: {null_ids} linha(s) pendente(s) com id nulo")
-
-dup_groups = (
-    pending.groupBy("id", "ingestion_date")
-    .count()
-    .filter(F.col("count") > 1)
-    .count()
-)
-if dup_groups:
-    raise Exception(
-        f"venda: {dup_groups} duplicidade(s) por (id, ingestion_date) no lote"
-    )
-
 typed = transformar(pending)
-detectar_drift(typed)
-valid, invalid = aplicar_contrato(typed)
 
-w = Window.partitionBy("id").orderBy(F.col("ingestion_date").desc())
-source = (
-    valid.withColumn("_rn", F.row_number().over(w))
-    .where(F.col("_rn") == 1)
-    .drop("_rn")
-)
+# Venda é current-state por id: validar somente o latest candidate, preservando
+# empates do mesmo snapshot para que no_duplicates possa quarantinar ambos.
+candidate_batch = CONTRACTS.latest_candidate(typed, ["id"])
+valid, invalid, contract_report = VALIDATOR.validate(candidate_batch)
+invalid = CONTRACTS.normalize_quarantine(invalid)
+CONTRACTS.log_report("venda", contract_report)
+
+# Só atualizamos o baseline de drift após o contrato estrutural passar.
+detectar_drift(typed)
+source = valid
 
 (
     DeltaTable.forName(spark, SILVER).alias("t")
@@ -379,6 +319,7 @@ if (
 
 print(
     f"✅ APPLY venda concluído | snapshots={len(snapshots)} "
+    f"| candidate rows={candidate_batch.count():,} "
     f"| source final={source.count():,} | quarantine={invalid_count:,}"
 )
 print(
