@@ -2,7 +2,8 @@
 # Gate C3 — fixture controlada do engine canônico de Data Contracts.
 #
 # Prova isoladamente:
-# PASS / QUARANTINE / WARNING / FAIL missing column / FAIL type / FAIL missing contract.
+# PASS / QUARANTINE / WARNING / FAIL missing column / FAIL type /
+# FAIL missing contract / snapshot-scoped uniqueness.
 # Não altera tabelas de negócio.
 
 from datetime import datetime, timedelta
@@ -45,8 +46,6 @@ def derive_bundle_files_path() -> str:
             "Execute via bundle/job ou informe bundle_files_path."
         ) from exc
 
-    # notebookPath costuma retornar /Users/...; arquivos do Workspace são acessados
-    # pelo filesystem Python em /Workspace/Users/...
     workspace_path = raw if raw.startswith("/Workspace/") else f"/Workspace{raw}"
     marker = "/pipeline/silver/"
     if marker not in workspace_path:
@@ -237,6 +236,37 @@ except ContractViolation as exc:
     missing_contract_failed = "ausente" in str(exc).lower()
 check("FAIL missing contract", missing_contract_failed)
 
+# 7) UNIQUE POR SNAPSHOT — repetir id em dias distintos é legítimo; no mesmo dia não.
+def scoped_row(id_value: str, snapshot: str):
+    return (
+        pass_df.withColumn("id", F.lit(id_value))
+        .withColumn("ingestion_date", F.lit(snapshot).cast("date"))
+    )
+
+scope_df = (
+    scoped_row("scope-ok", "2026-09-01")
+    .unionByName(scoped_row("scope-ok", "2026-09-02"))
+    .unionByName(scoped_row("scope-dup", "2026-09-02"))
+    .unionByName(scoped_row("scope-dup", "2026-09-02"))
+)
+s_valid, s_quar, s_report = validator.validate(
+    scope_df,
+    reference_time=REFERENCE_TIME,
+    uniqueness_scope=["ingestion_date"],
+)
+s_reasons = [
+    r["_contract_reason"]
+    for r in s_quar.select("_contract_reason").collect()
+]
+check(
+    "SNAPSHOT uniqueness scope",
+    s_valid.count() == 2
+    and s_quar.count() == 2
+    and all("no_duplicates" in r for r in s_reasons)
+    and any("scope=ingestion_date" in str(rule.get("detail")) for rule in s_report["rules"]),
+    f"valid={s_valid.count()} quarantine={s_quar.count()} reasons={s_reasons}",
+)
+
 passed = sum(1 for _, ok, _ in checks if ok)
 failed = len(checks) - passed
 print(f"\n=== C3 RESULT ===\n{passed}/{len(checks)} checks passaram | {failed} falharam")
@@ -245,4 +275,4 @@ if failed:
     failures = [f"{name}: {detail}" for name, ok, detail in checks if not ok]
     raise Exception("Gate C3 falhou:\n" + "\n".join(failures))
 
-print("\n✅ Contract engine provado em isolamento. Ainda NÃO integrado aos runtimes Silver.")
+print("\n✅ Contract engine + snapshot uniqueness provados. C4 ainda precisa passar nas fixtures de runtime.")
