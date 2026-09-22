@@ -1,22 +1,48 @@
 # Databricks notebook source
 # pipeline/silver/quality_gate.py
-# Quality Gate da Silver — valida volumetria, schema, SCD2 e freshness
-# Falha com Exception se houver erros críticos
+# Quality Gate da Silver — valida maturidade incremental, contratos, SCD2 e quarentena.
+# Falha com Exception se houver erros críticos.
+
+from datetime import datetime, timedelta, timezone
+import importlib.util
+import os
+import yaml
 
 from pyspark.sql import functions as F
-from datetime import datetime, timedelta, timezone
 
 
 def job_param(nome: str, default: str) -> str:
     try:
-        return dbutils.widgets.get(nome)
+        value = dbutils.widgets.get(nome)
+        return value if value else default
     except Exception:
         return default
 
 
+def derive_bundle_files_path() -> str:
+    """Resolve o root .../files tanto em execução manual quanto via bundle."""
+    raw = (
+        dbutils.notebook.entry_point.getDbutils()
+        .notebook()
+        .getContext()
+        .notebookPath()
+        .get()
+    )
+    workspace_path = raw if raw.startswith("/Workspace/") else f"/Workspace{raw}"
+    marker = "/pipeline/silver/"
+    if marker not in workspace_path:
+        raise Exception(
+            f"Silver Quality Gate fora do layout esperado do bundle: {workspace_path}"
+        )
+    return workspace_path.split(marker, 1)[0]
+
+
 CATALOG = job_param("catalog", "varejinho")
 BRONZE_SOURCE_CATALOG = job_param("bronze_source_catalog", "varejinho")
+BUNDLE_FILES_PATH = job_param("bundle_files_path", derive_bundle_files_path())
 FACT_WATERMARK = f"{CATALOG}.control.fact_watermark"
+CONTRACT_POLICY = f"{BUNDLE_FILES_PATH}/contracts/silver/_policy.yaml"
+CONTRACT_ENGINE = f"{BUNDLE_FILES_PATH}/quality/contract_engine.py"
 resultados = []
 
 
@@ -25,11 +51,43 @@ def check(nome, passou, detalhe=""):
     resultados.append(f"{status} {nome} {detalhe}")
 
 
-hoje = datetime.now(timezone.utc).date()
-ontem = hoje - timedelta(days=1)
+# ── Contract engine canônico ──────────────────────────────────────────────
+if not os.path.isfile(CONTRACT_ENGINE):
+    raise Exception(f"Contract engine ausente: {CONTRACT_ENGINE}")
+if not os.path.isfile(CONTRACT_POLICY):
+    raise Exception(f"Contract policy ausente: {CONTRACT_POLICY}")
+
+spec = importlib.util.spec_from_file_location(
+    "varejinho_contract_engine_qg",
+    CONTRACT_ENGINE,
+)
+if spec is None or spec.loader is None:
+    raise Exception(f"Não foi possível carregar contract engine: {CONTRACT_ENGINE}")
+contract_module = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(contract_module)
+ContractValidator = contract_module.ContractValidator
+ContractViolation = contract_module.ContractViolation
+
+with open(CONTRACT_POLICY, "r", encoding="utf-8") as f:
+    contract_policy = yaml.safe_load(f) or {}
+
+required_contracts = []
+standard_entities = []
+for tier, cfg in (contract_policy.get("tiers", {}) or {}).items():
+    entities = list(cfg.get("entities", []) or [])
+    if bool(cfg.get("contract_required", False)):
+        required_contracts.extend((entity, tier) for entity in entities)
+    else:
+        standard_entities.extend((entity, tier) for entity in entities)
+
+if len(required_contracts) != 20 or len(standard_entities) != 17:
+    raise Exception(
+        "Contract policy inesperada: "
+        f"required={len(required_contracts)} standard={len(standard_entities)}"
+    )
+
 
 # ── Fatos incrementais por partição madura ────────────────────────────────
-
 # Venda e as 13 facts transacionais/financeiras usam o mesmo invariant diário:
 # watermark único e COMMITTED, candidate limpo, committed == mature_cutoff
 # e nenhuma linha da partição ainda aberta presente na Silver.
@@ -51,13 +109,6 @@ INCREMENTAL_FACTS = [
     "pagaroutrasdespesasimposto",
 ]
 
-# Para essas 14 tabelas, o invariant diário não é Silver/full Bronze ratio.
-# Gates D5C e D7A provaram que a partição do dia D permanece aberta até D+1.
-# O QG agora valida o estado operacional incremental:
-#   - watermark existe e está COMMITTED;
-#   - candidate está limpo;
-#   - committed == maior partição fisicamente madura;
-#   - Silver não contém ingestion_date acima desse cutoff.
 for tabela in INCREMENTAL_FACTS:
     try:
         source = f"{BRONZE_SOURCE_CATALOG}.bronze.{tabela}"
@@ -131,50 +182,109 @@ for tabela in INCREMENTAL_FACTS:
     except Exception as e:
         resultados.append(f"❌ {tabela} incremental QG: {str(e)[:200]}")
 
-# ── SCD2 — integridade das dimensões ────────────────────────
+
+# ── SCD2 — integridade das dimensões ──────────────────────────────────────
 for dim in ["produto", "fornecedor", "mercadologico"]:
     try:
-        multi = (spark.table(f"{CATALOG}.silver.{dim}")
-                 .filter("is_current = true")
-                 .groupBy("id").count()
-                 .filter("count > 1").count())
-        check(f"{dim} SCD2 — no máximo 1 versão ativa por id",
-              multi == 0, f"({multi} ids com múltiplas versões ativas)")
+        multi = (
+            spark.table(f"{CATALOG}.silver.{dim}")
+            .filter("is_current = true")
+            .groupBy("id")
+            .count()
+            .filter("count > 1")
+            .count()
+        )
+        check(
+            f"{dim} SCD2 — no máximo 1 versão ativa por id",
+            multi == 0,
+            f"({multi} ids com múltiplas versões ativas)",
+        )
 
-        nulos = (spark.table(f"{CATALOG}.silver.{dim}")
-                 .filter("is_current IS NULL").count())
-        check(f"{dim} SCD2 — is_current não nulo",
-              nulos == 0, f"({nulos} registros com is_current NULL)")
+        nulos = (
+            spark.table(f"{CATALOG}.silver.{dim}")
+            .filter("is_current IS NULL")
+            .count()
+        )
+        check(
+            f"{dim} SCD2 — is_current não nulo",
+            nulos == 0,
+            f"({nulos} registros com is_current NULL)",
+        )
 
     except Exception as e:
         resultados.append(f"❌ {dim} SCD2: {str(e)[:100]}")
 
-# ── Schema — colunas críticas com tipo correto ───────────────
-SCHEMA_CHECKS = {
-    "venda":      [("valor_total", "decimal"), ("data", "timestamp")],
-    "logestoque": [("quantidade", "decimal"), ("datamovimento", "timestamp")],
-    "oferta":     [("precooferta", "decimal"), ("datainicio", "timestamp")],
-    "pedidoitem": [("quantidade", "decimal"), ("custocompra", "decimal")],
-}
 
-for tabela, cols in SCHEMA_CHECKS.items():
+# ── Data Contracts — gate estrutural central ──────────────────────────────
+# Row-level error é aplicado no runtime e evidenciado pela quarentena abaixo.
+# Aqui o QG evita rescan pesado das tabelas e prova que o contrato obrigatório
+# continua compatível com o schema físico materializado na Silver.
+for entity, tier in required_contracts:
+    physical = f"{CATALOG}.silver.{entity}"
+    contract_path = f"{BUNDLE_FILES_PATH}/contracts/silver/{entity}.yaml"
     try:
-        schema = {f.name: f.dataType.simpleString()
-                  for f in spark.table(f"{CATALOG}.silver.{tabela}").schema.fields}
-        for col_name, tipo_esperado in cols:
-            tipo_real = schema.get(col_name, "ausente")
-            check(f"{tabela}.{col_name} — tipo correto",
-                  tipo_esperado in tipo_real,
-                  f"(esperado: {tipo_esperado} | real: {tipo_real})")
-    except Exception as e:
-        resultados.append(f"❌ {tabela} schema: {str(e)[:100]}")
+        if not spark.catalog.tableExists(physical):
+            raise ContractViolation(f"Tabela Silver obrigatória ausente: {physical}")
 
-# ── Quarentena — valida somente o snapshot da execução atual ─
+        validator = ContractValidator(
+            contract_path,
+            spark=spark,
+            catalog=CATALOG,
+            schema="silver",
+        )
+        if validator.table != entity:
+            raise ContractViolation(
+                f"Contrato incorreto: esperado table={entity}; recebido={validator.table}"
+            )
+
+        # Usa a implementação de schema do engine canônico; não replica tipos aqui.
+        validator._validate_dataframe_schema(spark.table(physical))
+        check(
+            f"{entity} — contract structural",
+            True,
+            f"(tier={tier}; schema compatível)",
+        )
+    except Exception as e:
+        resultados.append(
+            f"❌ {entity} contract structural: {str(e)[:220]}"
+        )
+
+
+# ── Standard — gate simplificado ──────────────────────────────────────────
+# Essas 17 entidades não têm YAML completo por decisão arquitetural. O QG
+# garante apenas disponibilidade estrutural; regras de fato não são inventadas.
+for entity, tier in standard_entities:
+    physical = f"{CATALOG}.silver.{entity}"
+    try:
+        exists = spark.catalog.tableExists(physical)
+        col_count = len(spark.table(physical).columns) if exists else 0
+        check(
+            f"{entity} — standard availability",
+            exists and col_count > 0,
+            f"(tier={tier}; exists={exists}; columns={col_count})",
+        )
+    except Exception as e:
+        resultados.append(
+            f"❌ {entity} standard availability: {str(e)[:160]}"
+        )
+
+
+# ── Quarentena — valida somente a execução atual ──────────────────────────
 QUARENTENAS = [
-    "venda", "notaentrada", "notaentradaitem", "perda", "logestoque",
-    "promocao", "promocaoitem", "pedido", "pedidoitem", "oferta",
-    "pagarfornecedor", "pagarfornecedorparcela", "pagaroutrasdespesas",
-    "pagaroutrasdespesasimposto"
+    "venda",
+    "notaentrada",
+    "notaentradaitem",
+    "perda",
+    "logestoque",
+    "promocao",
+    "promocaoitem",
+    "pedido",
+    "pedidoitem",
+    "oferta",
+    "pagarfornecedor",
+    "pagarfornecedorparcela",
+    "pagaroutrasdespesas",
+    "pagaroutrasdespesasimposto",
 ]
 
 for tabela in QUARENTENAS:
@@ -182,17 +292,20 @@ for tabela in QUARENTENAS:
         quar_table = f"{CATALOG}.silver._quarantine_{tabela}"
         if spark.catalog.tableExists(quar_table):
             count = spark.table(quar_table).count()
-            check(f"{tabela} — quarentena",
-                  count == 0,
-                  f"({count:,} registros rejeitados nesta execução)")
+            check(
+                f"{tabela} — quarentena",
+                count == 0,
+                f"({count:,} registros rejeitados nesta execução)",
+            )
     except Exception as e:
         resultados.append(f"❌ {tabela} quarentena: {str(e)[:100]}")
+
 
 print(f"\n=== SILVER QUALITY GATE [{CATALOG}] ===\n")
 for r in resultados:
     print(r)
 
-total  = len(resultados)
+total = len(resultados)
 passou = sum(1 for r in resultados if r.startswith("✅"))
 falhas = [r for r in resultados if r.startswith("❌")]
 falhou = len(falhas)
