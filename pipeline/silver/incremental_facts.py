@@ -141,12 +141,6 @@ def paths_for(entity):
 
 
 def latest_mature_partition(entity):
-    """
-    Retorna a maior ingestion_date cuja partição já fechou fisicamente.
-
-    Regra aprovada no Gate D5C: D só é madura quando TODOS os arquivos
-    atualmente visíveis para D têm file_modification_time posterior a D.
-    """
     if MATURE_CUTOFF_OVERRIDE:
         cutoff = date.fromisoformat(MATURE_CUTOFF_OVERRIDE)
         print(f"[{entity}] mature_cutoff_override={cutoff}")
@@ -261,17 +255,18 @@ def processar(entity):
 
     transformed = aplicar_casts(pending, cfg)
 
-    # Silver é current-state. Primeiro escolhemos o snapshot mais recente por grain,
-    # preservando empates; então o contract engine decide PASS/QUARANTINE/WARNING.
-    candidate_batch = CONTRACTS.latest_candidate(transformed, keys)
-    valid, invalid, report = validator.validate(candidate_batch)
-    invalid = CONTRACTS.normalize_quarantine(invalid)
+    # Valida todo o lote. Unicidade é por grain+snapshot; só depois escolhemos
+    # o último estado VÁLIDO por chave, preservando a semântica já aprovada.
+    source, invalid, report = CONTRACTS.validate_snapshot_history(
+        validator,
+        transformed,
+        keys,
+    )
     CONTRACTS.log_report(entity, report)
 
     # Só promovemos o baseline de drift depois de o contrato estrutural passar.
     detectar_drift(entity, transformed)
 
-    source = valid
     cond_merge = " AND ".join([f"t.{k} = s.{k}" for k in keys])
     (
         DeltaTable.forName(spark, silver).alias("t")
@@ -315,7 +310,7 @@ def processar(entity):
 
     print(
         f"✅ {entity}: APPLY concluído | snapshots={len(snapshots)} "
-        f"| candidate rows={candidate_batch.count():,} "
+        f"| contract rows={report['total']:,} "
         f"| source final={source.count():,} | quarantine={invalid_count:,}"
     )
     print(
