@@ -1,7 +1,9 @@
 # Databricks notebook source
 # pipeline/silver/incremental_scd2.py
-# Gate B7E — engine incremental SCD2 reutilizável.
-# Primeiro consumidor novo: fornecedor. Produto será migrado somente após regressão controlada.
+# Engine incremental SCD2 reutilizável para produto, fornecedor e mercadologico.
+# Schema Drift é avaliado sobre uma representação Silver-shaped antes de qualquer MERGE.
+
+import importlib.util
 
 from delta.tables import DeltaTable
 from pyspark.sql import functions as F
@@ -15,8 +17,33 @@ def job_param(nome: str, default: str) -> str:
         return default
 
 
+def resolve_bundle_files_path() -> str:
+    explicit = job_param("bundle_files_path", "")
+    if explicit:
+        return explicit.rstrip("/")
+
+    try:
+        raw = (
+            dbutils.notebook.entry_point.getDbutils()
+            .notebook()
+            .getContext()
+            .notebookPath()
+            .get()
+        )
+        workspace_path = raw if raw.startswith("/Workspace/") else f"/Workspace{raw}"
+        marker = "/pipeline/silver/incremental_scd2"
+        if marker in workspace_path:
+            return workspace_path.split(marker, 1)[0]
+    except Exception:
+        pass
+
+    return "/Workspace/Users/<USER>/varejinho-data-platform"
+
+
 CATALOG = job_param("catalog", "varejinho_dev")
 ENTITY = job_param("entity", "fornecedor")
+BUNDLE_FILES_PATH = resolve_bundle_files_path()
+CONTROL_ROOT = job_param("control_root", "s3://varejinho-lake/_control/dev").rstrip("/")
 KEY = "id"
 SNAPSHOT = "ingestion_date"
 
@@ -92,6 +119,21 @@ CONTROL_SCHEMA = ".".join(CONTROL_TABLE.split(".")[:2])
 if not CATALOG.endswith("_dev"):
     raise Exception(f"incremental_scd2 só pode executar em *_dev durante hardening. Recebido: {CATALOG}")
 
+DRIFT_RUNTIME_PATH = f"{BUNDLE_FILES_PATH}/quality/schema_drift_runtime.py"
+_drift_spec = importlib.util.spec_from_file_location(
+    "varejinho_schema_drift_runtime_scd2", DRIFT_RUNTIME_PATH
+)
+if _drift_spec is None or _drift_spec.loader is None:
+    raise ImportError(f"Não foi possível carregar schema drift runtime: {DRIFT_RUNTIME_PATH}")
+_drift_module = importlib.util.module_from_spec(_drift_spec)
+_drift_spec.loader.exec_module(_drift_module)
+SilverSchemaDriftRuntime = _drift_module.SilverSchemaDriftRuntime
+DRIFT = SilverSchemaDriftRuntime(
+    dbutils=dbutils,
+    control_root=CONTROL_ROOT,
+    bundle_files_path=BUNDLE_FILES_PATH,
+)
+
 bronze = spark.table(BRONZE)
 source_cols = set(bronze.columns)
 TYPE2_COLS = CFG["type2"]
@@ -136,6 +178,30 @@ def changed_expr(left_alias: str, right_alias: str, cols):
         current = ~F.col(f"{left_alias}.{c}").eqNullSafe(F.col(f"{right_alias}.{c}"))
         expr = current if expr is None else (expr | current)
     return expr if expr is not None else F.lit(False)
+
+
+def build_schema_drift_probe():
+    """Representa o schema que o runtime SCD2 materializa na Silver.
+
+    Colunas de negócio vêm da Bronze com os tipos observados. Somente as colunas
+    técnicas geradas pelo runtime são adicionadas usando os tipos já aceitos na
+    Silver. Assim additive/removed/type_change da origem continuam visíveis,
+    sem comparar Bronze bruta diretamente contra um baseline que contém campos SCD2.
+    """
+    silver_fields = {field.name: field.dataType for field in spark.table(SILVER).schema.fields}
+    probe = bronze.limit(0)
+    generated = [
+        "hash_versao",
+        "valid_from",
+        "valid_to",
+        "is_current",
+        "valid_from_source",
+        "scd_source_snapshot",
+    ]
+    for column in generated:
+        if column in silver_fields and column not in probe.columns:
+            probe = probe.withColumn(column, F.lit(None).cast(silver_fields[column]))
+    return probe
 
 
 def ensure_control_table():
@@ -418,6 +484,8 @@ def insert_versions(events, silver_columns):
     if missing_cols:
         raise Exception(f"Insert incremental não reproduz schema Silver. Faltam: {missing_cols}")
 
+    # A política de additive já foi aplicada no preflight. Esta projeção mantém a
+    # Silver no baseline aceito até uma promoção explícita do schema.
     prepared = prepared.select(*silver_columns)
     before = spark.table(SILVER).count()
     (
@@ -558,16 +626,25 @@ def process_snapshot(snapshot_date, previous_date, silver_columns):
     }
 
 
-ensure_control_table()
-
 if not spark.catalog.tableExists(SILVER):
     raise Exception(f"{SILVER} não existe. Execute o backfill/Quality Gate antes do incremental.")
 
-print("\n=== GATE B7E — GENERIC INCREMENTAL SCD2 ===")
+# Schema Drift precisa ser decidido antes de qualquer MERGE SCD2. O probe usa
+# tipos observados da Bronze + somente as colunas técnicas geradas pelo runtime.
+# Assim não comparamos Bronze bruta diretamente contra um baseline Silver.
+drift_probe = build_schema_drift_probe()
+_, drift_report = DRIFT.evaluate(ENTITY, drift_probe)
+
+ensure_control_table()
+
+print("\n=== GENERIC INCREMENTAL SCD2 ===")
 print(f"Entity:  {ENTITY}")
 print(f"Bronze:  {BRONZE}")
 print(f"Silver:  {SILVER}")
 print(f"Control: {CONTROL_TABLE}")
+print(f"Control root: {CONTROL_ROOT}")
+print(f"Bundle files path: {BUNDLE_FILES_PATH}")
+print(f"Schema Drift: {drift_report['classification']} | action={drift_report['action']}")
 print(f"Type 2:  {TYPE2_COLS}")
 print(f"Type 1:  {len(TYPE1_COLS)} atributo(s)")
 print(f"Initial boundary: {CFG['initial_valid_from']}")
@@ -626,7 +703,7 @@ else:
         WHERE entity = '{ENTITY}'
     """)
 
-    print("\n=== B7E APPLY CONCLUÍDO ===")
+    print("\n=== SCD2 APPLY CONCLUÍDO ===")
     print(f"snapshots processados:           {len(new_snapshots)}")
     print(f"novos ids observados:            {totals['new_ids']:,}")
     print(f"mudanças Type 2 observadas:      {totals['type2_changes']:,}")
