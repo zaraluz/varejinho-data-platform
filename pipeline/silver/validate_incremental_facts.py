@@ -1,11 +1,12 @@
 # Databricks notebook source
 # pipeline/silver/validate_incremental_facts.py
 # Valida Silver após APPLY incremental e antes do commit do fact_watermark.
+# Expected e runtime usam o mesmo contract engine canônico.
 
 from functools import reduce
+import importlib.util
+
 from pyspark.sql import functions as F
-from pyspark.sql.window import Window
-import yaml
 
 
 def job_param(nome: str, default: str) -> str:
@@ -29,6 +30,21 @@ if not CATALOG.endswith("_dev"):
     raise Exception(
         f"validate_incremental_facts só pode executar em *_dev. Recebido: {CATALOG}"
     )
+
+CONTRACT_RUNTIME_PATH = f"{BUNDLE_FILES_PATH}/quality/contract_runtime.py"
+_runtime_spec = importlib.util.spec_from_file_location(
+    "varejinho_contract_runtime_validate", CONTRACT_RUNTIME_PATH
+)
+if _runtime_spec is None or _runtime_spec.loader is None:
+    raise ImportError(f"Não foi possível carregar contract runtime: {CONTRACT_RUNTIME_PATH}")
+_contract_runtime_module = importlib.util.module_from_spec(_runtime_spec)
+_runtime_spec.loader.exec_module(_contract_runtime_module)
+SilverContractRuntime = _contract_runtime_module.SilverContractRuntime
+CONTRACTS = SilverContractRuntime(
+    spark=spark,
+    catalog=CATALOG,
+    bundle_files_path=BUNDLE_FILES_PATH,
+)
 
 CONFIG = {
     "notaentrada": {"chave": ["numeronota", "id_loja", "id_fornecedor"], "data": "dataentrada", "decimais": ["valortotal", "valormercadoria", "valordesconto"]},
@@ -83,48 +99,12 @@ def aplicar_casts(df, cfg):
     return df
 
 
-def filtrar_contrato(entity, df):
-    path = f"{BUNDLE_FILES_PATH}/contracts/silver/{entity}.yaml"
-    try:
-        with open(path, "r") as f:
-            contract = yaml.safe_load(f)
-    except FileNotFoundError:
-        return df
-
-    work = df.withColumn("_invalido", F.lit(False))
-
-    for cfg in contract.get("columns", []):
-        name = cfg.get("name")
-        if name not in work.columns:
-            continue
-
-        if not cfg.get("nullable", True):
-            work = work.withColumn(
-                "_invalido",
-                F.when(F.col(name).isNull(), F.lit(True))
-                 .otherwise(F.col("_invalido")),
-            )
-
-        min_val = cfg.get("min")
-        if min_val is not None:
-            try:
-                min_num = float(min_val)
-                work = work.withColumn(
-                    "_invalido",
-                    F.when(F.col(name).cast("double") < min_num, F.lit(True))
-                     .otherwise(F.col("_invalido")),
-                )
-            except (TypeError, ValueError):
-                pass
-
-    return work.where(~F.col("_invalido")).drop("_invalido")
-
-
 def validar(entity):
     cfg = CONFIG[entity]
     keys = cfg["chave"]
     bronze = BRONZE_OVERRIDE or f"{CATALOG}.bronze.{entity}"
     silver = SILVER_OVERRIDE or f"{CATALOG}.silver.{entity}"
+    validator = CONTRACTS.validator(entity, keys)
 
     rows = (
         spark.table(CONTROL_TABLE)
@@ -148,18 +128,17 @@ def validar(entity):
             f"candidate={candidate}"
         )
 
-    expected = (
+    expected_history = (
         spark.table(bronze)
         .filter(F.col("ingestion_date") <= F.lit(candidate))
     )
-    expected = filtrar_contrato(entity, aplicar_casts(expected, cfg))
-
-    w = Window.partitionBy(*keys).orderBy(F.col("ingestion_date").desc())
-    expected = (
-        expected.withColumn("_rn", F.row_number().over(w))
-        .where(F.col("_rn") == 1)
-        .drop("_rn")
+    expected_history = aplicar_casts(expected_history, cfg)
+    expected, _, contract_report = CONTRACTS.validate_snapshot_history(
+        validator,
+        expected_history,
+        keys,
     )
+    CONTRACTS.log_report(f"validate:{entity}", contract_report)
 
     actual = spark.table(silver)
 
@@ -178,7 +157,6 @@ def validar(entity):
     extra = a_keys.join(e_keys, on=keys, how="left_anti").count()
 
     mismatches = None
-    joined = None
     mismatch_df = None
     nonkeys = []
 
@@ -250,19 +228,11 @@ def validar(entity):
 
         if missing > 0:
             print("\nAmostra de chaves esperadas e ausentes na Silver:")
-            (
-                e_keys.join(a_keys, on=keys, how="left_anti")
-                .limit(10)
-                .show(truncate=False)
-            )
+            e_keys.join(a_keys, on=keys, how="left_anti").limit(10).show(truncate=False)
 
         if extra > 0:
             print("\nAmostra de chaves extras na Silver:")
-            (
-                a_keys.join(e_keys, on=keys, how="left_anti")
-                .limit(10)
-                .show(truncate=False)
-            )
+            a_keys.join(e_keys, on=keys, how="left_anti").limit(10).show(truncate=False)
 
         if mismatch_df is not None and mismatches > 0:
             print("\nMismatch por coluna:")
@@ -284,21 +254,6 @@ def validar(entity):
             changed_cols.sort(key=lambda x: x[1], reverse=True)
             for col, count in changed_cols:
                 print(f"  {col}: {count:,}")
-
-            sample_cols = [
-                F.col(f"e.{key}").alias(key)
-                for key in keys
-            ]
-            if "ingestion_date" in nonkeys:
-                sample_cols.extend(
-                    [
-                        F.col("e.ingestion_date").alias("expected_ingestion_date"),
-                        F.col("a.ingestion_date").alias("actual_ingestion_date"),
-                    ]
-                )
-
-            print("\nAmostra de chaves com valores divergentes:")
-            mismatch_df.select(*sample_cols).limit(10).show(truncate=False)
 
         print(
             "\n⚠️ Watermark NÃO será committed. "
