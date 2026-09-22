@@ -21,10 +21,18 @@ BUNDLE_FILES_PATH = job_param(
     "bundle_files_path",
     "/Workspace/Users/<USER>/varejinho-data-platform",
 )
-CONTROL_ROOT = job_param("control_root", "s3://varejinho-lake/_control/dev")
+CONTROL_ROOT = job_param("control_root", "s3://varejinho-lake/_control/dev").rstrip("/")
 CONTROL_TABLE = job_param("control_table", f"{CATALOG}.control.fact_watermark")
 BRONZE = job_param("bronze_table", f"{CATALOG}.bronze.venda")
 SILVER = job_param("silver_table", f"{CATALOG}.silver.venda")
+
+# A fixture D7C mantém registry próprio; runtime real continua no CONTROL_ROOT normal.
+_is_d7c_fixture = "_d7c_" in " ".join([BRONZE, SILVER, CONTROL_TABLE])
+DRIFT_CONTROL_ROOT = (
+    CONTROL_ROOT
+    if (not _is_d7c_fixture or CONTROL_ROOT.endswith("/d7c"))
+    else f"{CONTROL_ROOT}/d7c"
+)
 
 if not CATALOG.endswith("_dev"):
     raise Exception(
@@ -59,7 +67,7 @@ _drift_spec.loader.exec_module(_drift_module)
 SilverSchemaDriftRuntime = _drift_module.SilverSchemaDriftRuntime
 DRIFT = SilverSchemaDriftRuntime(
     dbutils=dbutils,
-    control_root=CONTROL_ROOT,
+    control_root=DRIFT_CONTROL_ROOT,
     bundle_files_path=BUNDLE_FILES_PATH,
 )
 
