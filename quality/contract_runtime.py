@@ -1,14 +1,14 @@
 # quality/contract_runtime.py
 # Adaptador único entre os runtimes Silver incrementais e o contract_engine.
 # Não contém regras de qualidade próprias: resolve contrato/engine, confere grain
-# e prepara o latest candidate de uma tabela current-state antes da validação.
+# e aplica o contexto de snapshots necessário a tabelas current-state.
 
 from __future__ import annotations
 
 import importlib.util
 import json
 import os
-from typing import List, Tuple
+from typing import List
 
 from pyspark.sql import DataFrame
 from pyspark.sql import functions as F
@@ -55,32 +55,52 @@ class SilverContractRuntime:
         return validator
 
     @staticmethod
-    def latest_candidate(
+    def latest_valid_state(
         df: DataFrame,
         grain: List[str],
         snapshot_col: str = "ingestion_date",
     ) -> DataFrame:
-        """
-        Retém o snapshot mais recente por grain, mas preserva empates.
-
-        Preservar empates é intencional: se duas linhas com o mesmo grain
-        coexistirem no mesmo snapshot mais recente, o contract_engine deve
-        enxergar ambas e a regra no_duplicates deve quarantinar a ambiguidade.
-        """
+        """Retém uma única versão válida mais recente por grain."""
         required = set(grain) | {snapshot_col}
         missing = sorted(required - set(df.columns))
         if missing:
             raise ContractViolation(
-                f"latest_candidate: colunas obrigatórias ausentes: {missing}"
+                f"latest_valid_state: colunas obrigatórias ausentes: {missing}"
             )
 
-        token = "_contract_latest_snapshot"
-        w = Window.partitionBy(*grain)
+        token = "_contract_rn_latest"
+        w = Window.partitionBy(*grain).orderBy(F.col(snapshot_col).desc())
         return (
-            df.withColumn(token, F.max(F.col(snapshot_col)).over(w))
-            .where(F.col(snapshot_col) == F.col(token))
+            df.withColumn(token, F.row_number().over(w))
+            .where(F.col(token) == 1)
             .drop(token)
         )
+
+    def validate_snapshot_history(
+        self,
+        validator,
+        df: DataFrame,
+        grain: List[str],
+        snapshot_col: str = "ingestion_date",
+    ):
+        """
+        Valida todas as linhas do histórico/lote de snapshots.
+
+        Unicidade é escopada ao snapshot: repetir o mesmo grain em dias
+        diferentes é uma atualização legítima; repetir no mesmo snapshot é
+        duplicata real e vai para quarantine. Depois das regras, retorna o
+        último estado VÁLIDO por grain, preservando a semântica current-state.
+        """
+        valid_history, quarantine, report = validator.validate(
+            df,
+            uniqueness_scope=[snapshot_col],
+        )
+        current_state = self.latest_valid_state(
+            valid_history,
+            grain=grain,
+            snapshot_col=snapshot_col,
+        )
+        return current_state, self.normalize_quarantine(quarantine), report
 
     @staticmethod
     def normalize_quarantine(df: DataFrame) -> DataFrame:
