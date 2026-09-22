@@ -2,11 +2,11 @@
 # pipeline/silver/incremental_facts.py
 # Runtime incremental genérico Bronze -> Silver para fatos.
 # APPLY somente: o watermark fica PENDING_VALIDATION até task de commit separada.
+# Schema Drift: engine canônico antes de Contracts/MERGE.
 # Data Contracts: engine canônico em quality/contract_engine.py via contract_runtime.py.
 
 from datetime import date
 import importlib.util
-import json
 
 from delta.tables import DeltaTable
 from pyspark.sql import functions as F
@@ -54,6 +54,21 @@ CONTRACTS = SilverContractRuntime(
     bundle_files_path=BUNDLE_FILES_PATH,
 )
 
+DRIFT_RUNTIME_PATH = f"{BUNDLE_FILES_PATH}/quality/schema_drift_runtime.py"
+_drift_spec = importlib.util.spec_from_file_location(
+    "varejinho_schema_drift_runtime_facts", DRIFT_RUNTIME_PATH
+)
+if _drift_spec is None or _drift_spec.loader is None:
+    raise ImportError(f"Não foi possível carregar schema drift runtime: {DRIFT_RUNTIME_PATH}")
+_drift_module = importlib.util.module_from_spec(_drift_spec)
+_drift_spec.loader.exec_module(_drift_module)
+SilverSchemaDriftRuntime = _drift_module.SilverSchemaDriftRuntime
+DRIFT = SilverSchemaDriftRuntime(
+    dbutils=dbutils,
+    control_root=CONTROL_ROOT,
+    bundle_files_path=BUNDLE_FILES_PATH,
+)
+
 CONFIG = {
     "notaentrada": {"chave": ["numeronota", "id_loja", "id_fornecedor"], "data": "dataentrada", "decimais": ["valortotal", "valormercadoria", "valordesconto"]},
     "notaentradaitem": {"chave": ["id"], "data": None, "decimais": ["quantidade", "valor", "valortotal"]},
@@ -69,30 +84,6 @@ CONFIG = {
     "pagaroutrasdespesas": {"chave": ["id"], "data": "dataemissao", "decimais": ["valor", "valorbruto"]},
     "pagaroutrasdespesasimposto": {"chave": ["id"], "data": "datavencimento", "decimais": ["valor", "basecalculo", "aliquota"]},
 }
-
-
-def detectar_drift(tabela, df):
-    schema_atual = {f.name: f.dataType.simpleString() for f in df.schema.fields}
-    registry_file = f"{CONTROL_ROOT}/schema_registry/{tabela}.json"
-    try:
-        anterior = json.loads(dbutils.fs.head(registry_file))
-    except Exception:
-        dbutils.fs.put(registry_file, json.dumps(schema_atual), overwrite=True)
-        print(f"[{tabela}] Schema baseline criado em {registry_file}")
-        return
-
-    novas = sorted(set(schema_atual) - set(anterior))
-    removidas = sorted(set(anterior) - set(schema_atual))
-    alteradas = {
-        c: {"antes": anterior[c], "depois": schema_atual[c]}
-        for c in set(schema_atual) & set(anterior)
-        if anterior[c] != schema_atual[c]
-    }
-    if novas or removidas or alteradas:
-        print(f"[DRIFT] {tabela}: novas={novas} removidas={removidas} alteradas={alteradas}")
-    else:
-        print(f"[{tabela}] Schema sem alterações.")
-    dbutils.fs.put(registry_file, json.dumps(schema_atual), overwrite=True)
 
 
 def aplicar_casts(df, cfg):
@@ -255,17 +246,18 @@ def processar(entity):
 
     transformed = aplicar_casts(pending, cfg)
 
+    # Drift primeiro: additive é registrado e projetado ao baseline aceito;
+    # breaking drift persiste evento e bloqueia antes de qualquer MERGE.
+    drift_accepted, drift_report = DRIFT.evaluate(entity, transformed)
+
     # Valida todo o lote. Unicidade é por grain+snapshot; só depois escolhemos
     # o último estado VÁLIDO por chave, preservando a semântica já aprovada.
     source, invalid, report = CONTRACTS.validate_snapshot_history(
         validator,
-        transformed,
+        drift_accepted,
         keys,
     )
     CONTRACTS.log_report(entity, report)
-
-    # Só promovemos o baseline de drift depois de o contrato estrutural passar.
-    detectar_drift(entity, transformed)
 
     cond_merge = " AND ".join([f"t.{k} = s.{k}" for k in keys])
     (
@@ -310,6 +302,7 @@ def processar(entity):
 
     print(
         f"✅ {entity}: APPLY concluído | snapshots={len(snapshots)} "
+        f"| drift={drift_report['classification']} "
         f"| contract rows={report['total']:,} "
         f"| source final={source.count():,} | quarantine={invalid_count:,}"
     )
