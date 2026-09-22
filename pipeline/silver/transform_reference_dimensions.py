@@ -13,16 +13,38 @@ from delta.tables import DeltaTable
 
 def job_param(nome: str, default: str) -> str:
     try:
-        return dbutils.widgets.get(nome)
+        value = dbutils.widgets.get(nome)
+        return value if value else default
     except Exception:
         return default
 
 
+def resolve_bundle_files_path() -> str:
+    explicit = job_param("bundle_files_path", "")
+    if explicit:
+        return explicit.rstrip("/")
+
+    try:
+        raw = (
+            dbutils.notebook.entry_point.getDbutils()
+            .notebook()
+            .getContext()
+            .notebookPath()
+            .get()
+        )
+        workspace_path = raw if raw.startswith("/Workspace/") else f"/Workspace{raw}"
+        marker = "/pipeline/silver/transform_reference_dimensions"
+        if marker in workspace_path:
+            return workspace_path.split(marker, 1)[0]
+    except Exception:
+        pass
+
+    # Fallback somente para compatibilidade manual antiga.
+    return "/Workspace/Users/<USER>/varejinho-data-platform"
+
+
 CATALOG = job_param("catalog", "varejinho_dev")
-BUNDLE_FILES_PATH = job_param(
-    "bundle_files_path",
-    "/Workspace/Users/<USER>/varejinho-data-platform",
-)
+BUNDLE_FILES_PATH = resolve_bundle_files_path()
 CONTROL_ROOT = job_param("control_root", "s3://varejinho-lake/_control/dev")
 
 if not CATALOG.endswith("_dev"):
@@ -56,6 +78,7 @@ SCD1_TABELAS = [
 
 print("\n=== SILVER — REFERENCE DIMENSIONS / SNAPSHOTS ===")
 print(f"Catalog: {CATALOG}")
+print(f"Bundle files path: {BUNDLE_FILES_PATH}")
 print("SCD2 excluídos deste notebook: produto, fornecedor, mercadologico")
 print("Schema Drift: preflight completo antes de qualquer write\n")
 
