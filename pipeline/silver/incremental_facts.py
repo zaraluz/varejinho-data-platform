@@ -2,13 +2,14 @@
 # pipeline/silver/incremental_facts.py
 # Runtime incremental genérico Bronze -> Silver para fatos.
 # APPLY somente: o watermark fica PENDING_VALIDATION até task de commit separada.
+# Data Contracts: engine canônico em quality/contract_engine.py via contract_runtime.py.
 
-from pyspark.sql import functions as F
-from pyspark.sql.window import Window
-from delta.tables import DeltaTable
 from datetime import date
+import importlib.util
 import json
-import yaml
+
+from delta.tables import DeltaTable
+from pyspark.sql import functions as F
 
 
 def job_param(nome: str, default: str) -> str:
@@ -37,6 +38,21 @@ if not CATALOG.endswith("_dev"):
     raise Exception(
         f"incremental_facts só pode executar em *_dev durante hardening. Recebido: {CATALOG}"
     )
+
+CONTRACT_RUNTIME_PATH = f"{BUNDLE_FILES_PATH}/quality/contract_runtime.py"
+_runtime_spec = importlib.util.spec_from_file_location(
+    "varejinho_contract_runtime", CONTRACT_RUNTIME_PATH
+)
+if _runtime_spec is None or _runtime_spec.loader is None:
+    raise ImportError(f"Não foi possível carregar contract runtime: {CONTRACT_RUNTIME_PATH}")
+_contract_runtime_module = importlib.util.module_from_spec(_runtime_spec)
+_runtime_spec.loader.exec_module(_contract_runtime_module)
+SilverContractRuntime = _contract_runtime_module.SilverContractRuntime
+CONTRACTS = SilverContractRuntime(
+    spark=spark,
+    catalog=CATALOG,
+    bundle_files_path=BUNDLE_FILES_PATH,
+)
 
 CONFIG = {
     "notaentrada": {"chave": ["numeronota", "id_loja", "id_fornecedor"], "data": "dataentrada", "decimais": ["valortotal", "valormercadoria", "valordesconto"]},
@@ -115,68 +131,6 @@ def aplicar_casts(df, cfg):
     return df
 
 
-def aplicar_contrato(tabela, df):
-    contract_path = f"{BUNDLE_FILES_PATH}/contracts/silver/{tabela}.yaml"
-    try:
-        with open(contract_path, "r") as f:
-            contract = yaml.safe_load(f)
-    except FileNotFoundError:
-        print(f"[{tabela}] Contrato não encontrado — seguindo sem filtro.")
-        return df, df.where(F.lit(False))
-
-    work = (
-        df.withColumn("_invalido", F.lit(False))
-          .withColumn("_motivo", F.lit(""))
-    )
-
-    for col_cfg in contract.get("columns", []):
-        name = col_cfg.get("name")
-        if name not in work.columns:
-            continue
-
-        if not col_cfg.get("nullable", True):
-            work = (
-                work.withColumn(
-                    "_invalido",
-                    F.when(F.col(name).isNull(), F.lit(True))
-                     .otherwise(F.col("_invalido")),
-                )
-                .withColumn(
-                    "_motivo",
-                    F.when(
-                        F.col(name).isNull(),
-                        F.concat(F.col("_motivo"), F.lit(f"|{name} nulo")),
-                    ).otherwise(F.col("_motivo")),
-                )
-            )
-
-        min_val = col_cfg.get("min")
-        if min_val is not None:
-            try:
-                min_num = float(min_val)
-                work = (
-                    work.withColumn(
-                        "_invalido",
-                        F.when(F.col(name).cast("double") < min_num, F.lit(True))
-                         .otherwise(F.col("_invalido")),
-                    )
-                    .withColumn(
-                        "_motivo",
-                        F.when(
-                            F.col(name).cast("double") < min_num,
-                            F.concat(F.col("_motivo"), F.lit(f"|{name} < {min_val}")),
-                        ).otherwise(F.col("_motivo")),
-                    )
-                )
-            except (ValueError, TypeError):
-                pass
-
-    return (
-        work.where(~F.col("_invalido")).drop("_invalido", "_motivo"),
-        work.where(F.col("_invalido")).drop("_invalido"),
-    )
-
-
 def paths_for(entity):
     return (
         BRONZE_OVERRIDE or f"{CATALOG}.bronze.{entity}",
@@ -190,12 +144,8 @@ def latest_mature_partition(entity):
     """
     Retorna a maior ingestion_date cuja partição já fechou fisicamente.
 
-    Regra aprovada no Gate D5C:
-    uma partição D só é madura quando TODOS os arquivos atualmente visíveis
-    para D têm file_modification_time em data posterior a D (D+1 ou mais).
-
-    O override existe apenas para fixtures/sandboxes, que não possuem _metadata
-    da external table real.
+    Regra aprovada no Gate D5C: D só é madura quando TODOS os arquivos
+    atualmente visíveis para D têm file_modification_time posterior a D.
     """
     if MATURE_CUTOFF_OVERRIDE:
         cutoff = date.fromisoformat(MATURE_CUTOFF_OVERRIDE)
@@ -216,20 +166,21 @@ def latest_mature_partition(entity):
         GROUP BY ingestion_date
     """)
 
-    row = (
+    return (
         maturity
         .filter(F.col("min_modified_date") > F.col("ingestion_date"))
         .agg(F.max("ingestion_date").alias("mature_cutoff"))
-        .collect()[0]
+        .collect()[0]["mature_cutoff"]
     )
-
-    return row["mature_cutoff"]
 
 
 def processar(entity):
     cfg = CONFIG[entity]
     keys = cfg["chave"]
     bronze, silver, quarantine, history = paths_for(entity)
+
+    # Contrato critical/high é pré-condição do runtime, inclusive em no-op.
+    validator = CONTRACTS.validator(entity, keys)
 
     if not spark.catalog.tableExists(bronze):
         raise Exception(f"{entity}: Bronze ausente: {bronze}")
@@ -253,8 +204,6 @@ def processar(entity):
     candidate = state["candidate_snapshot"]
     status = state["status"]
 
-    # Resume seguro: se o APPLY anterior terminou e deixou candidate pendente,
-    # não reaplicamos o MERGE. A próxima task deve reexecutar a validação.
     if status == "PENDING_VALIDATION" and candidate is not None:
         print(
             f"ℹ️ {entity}: candidate={candidate} já está PENDING_VALIDATION. "
@@ -310,38 +259,19 @@ def processar(entity):
         print(f"✅ {entity}: nenhum snapshot pendente; no-op.")
         return
 
-    null_cond = None
-    for key in keys:
-        expr = F.col(key).isNull()
-        null_cond = expr if null_cond is None else (null_cond | expr)
-    null_keys = pending.filter(null_cond).count()
-    if null_keys:
-        raise Exception(f"{entity}: {null_keys} linha(s) pendente(s) com chave nula")
-
-    dup_groups = (
-        pending.groupBy(*(keys + ["ingestion_date"]))
-        .count()
-        .filter(F.col("count") > 1)
-        .count()
-    )
-    if dup_groups:
-        raise Exception(
-            f"{entity}: {dup_groups} duplicidade(s) por chave/snapshot no lote pendente"
-        )
-
     transformed = aplicar_casts(pending, cfg)
+
+    # Silver é current-state. Primeiro escolhemos o snapshot mais recente por grain,
+    # preservando empates; então o contract engine decide PASS/QUARANTINE/WARNING.
+    candidate_batch = CONTRACTS.latest_candidate(transformed, keys)
+    valid, invalid, report = validator.validate(candidate_batch)
+    invalid = CONTRACTS.normalize_quarantine(invalid)
+    CONTRACTS.log_report(entity, report)
+
+    # Só promovemos o baseline de drift depois de o contrato estrutural passar.
     detectar_drift(entity, transformed)
-    valid, invalid = aplicar_contrato(entity, transformed)
 
-    # Vários snapshots podem estar pendentes. A Silver é current-state:
-    # basta o último estado VÁLIDO por chave dentro do lote.
-    w = Window.partitionBy(*keys).orderBy(F.col("ingestion_date").desc())
-    source = (
-        valid.withColumn("_rn", F.row_number().over(w))
-        .where(F.col("_rn") == 1)
-        .drop("_rn")
-    )
-
+    source = valid
     cond_merge = " AND ".join([f"t.{k} = s.{k}" for k in keys])
     (
         DeltaTable.forName(spark, silver).alias("t")
@@ -385,6 +315,7 @@ def processar(entity):
 
     print(
         f"✅ {entity}: APPLY concluído | snapshots={len(snapshots)} "
+        f"| candidate rows={candidate_batch.count():,} "
         f"| source final={source.count():,} | quarantine={invalid_count:,}"
     )
     print(
