@@ -84,6 +84,11 @@ class ContractValidator:
                 raise ContractViolation(
                     f"{self.table}: toda coluna precisa de name + type"
                 )
+            accepted = cfg.get("accepted_values")
+            if accepted is not None and not isinstance(accepted, list):
+                raise ContractViolation(
+                    f"{self.table}.{name}: accepted_values deve ser lista"
+                )
             names.append(str(name))
 
         duplicates = sorted({name for name in names if names.count(name) > 1})
@@ -184,6 +189,13 @@ class ContractValidator:
             return self._append_reason(df, condition, f"{rule_name}:{detail}")
         return df
 
+    @staticmethod
+    def _with_duplicate_flag(df: DataFrame, key: List[str], token: str) -> DataFrame:
+        return df.withColumn(
+            token,
+            F.count(F.lit(1)).over(Window.partitionBy(*key)) > 1,
+        )
+
     def _resolve_reference(self, reference: str) -> Tuple[str, str]:
         parts = str(reference).split(".")
         if len(parts) != 2 or not all(parts):
@@ -224,7 +236,6 @@ class ContractValidator:
         )
         report_rows: List[Dict] = []
 
-        # Regras row-level declaradas diretamente em columns.
         explicit_not_null = {
             col
             for rule in self.rules
@@ -237,7 +248,7 @@ class ContractValidator:
             if rule.get("rule") == "no_duplicates"
         }
 
-        for cfg in self.columns:
+        for idx, cfg in enumerate(self.columns):
             name = str(cfg["name"])
 
             if not bool(cfg.get("nullable", True)) and name not in explicit_not_null:
@@ -276,7 +287,7 @@ class ContractValidator:
             if accepted is not None:
                 work = self._record_condition(
                     work,
-                    F.col(name).isNotNull() & (~F.col(name).isin(list(accepted))),
+                    F.col(name).isNotNull() & (~F.col(name).isin(accepted)),
                     "accepted_values",
                     "error",
                     report_rows,
@@ -284,17 +295,17 @@ class ContractValidator:
                 )
 
             if bool(cfg.get("unique", False)) and (name,) not in explicit_duplicate_keys:
-                dup = F.count(F.lit(1)).over(Window.partitionBy(name)) > 1
+                token = f"_contract_dup_col_{idx}"
+                work = self._with_duplicate_flag(work, [name], token)
                 work = self._record_condition(
                     work,
-                    dup,
+                    F.col(token),
                     "no_duplicates",
                     "error",
                     report_rows,
                     name,
-                )
+                ).drop(token)
 
-        # quality_rules com severity explícita.
         for idx, rule in enumerate(self.rules):
             rule_name = str(rule["rule"])
             severity = str(rule["severity"]).lower()
@@ -330,15 +341,16 @@ class ContractValidator:
                     raise ContractViolation(
                         f"{self.table}: no_duplicates referencia colunas ausentes: {missing}"
                     )
-                condition = F.count(F.lit(1)).over(Window.partitionBy(*key)) > 1
+                token = f"_contract_dup_rule_{idx}"
+                work = self._with_duplicate_flag(work, key, token)
                 work = self._record_condition(
                     work,
-                    condition,
+                    F.col(token),
                     rule_name,
                     severity,
                     report_rows,
                     ",".join(key),
-                )
+                ).drop(token)
 
             elif rule_name == "referential_integrity":
                 column = str(rule.get("column", "") or "")
@@ -399,10 +411,7 @@ class ContractValidator:
                     )
 
         total = work.count()
-        quarantine = (
-            work.where(F.col("_contract_invalid"))
-            .drop("_contract_invalid")
-        )
+        quarantine = work.where(F.col("_contract_invalid")).drop("_contract_invalid")
         valid = (
             work.where(~F.col("_contract_invalid"))
             .drop("_contract_invalid", "_contract_reason")
