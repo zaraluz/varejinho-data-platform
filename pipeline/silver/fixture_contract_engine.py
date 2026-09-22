@@ -8,6 +8,7 @@
 from datetime import datetime, timedelta
 from decimal import Decimal
 import importlib.util
+import os
 import uuid
 
 from pyspark.sql import functions as F
@@ -22,16 +23,41 @@ from pyspark.sql.types import (
 
 def job_param(nome: str, default: str) -> str:
     try:
-        return dbutils.widgets.get(nome)
+        value = dbutils.widgets.get(nome)
+        return value if value else default
     except Exception:
         return default
 
 
+def derive_bundle_files_path() -> str:
+    """Resolve o root .../dev/files quando o notebook é executado manualmente."""
+    try:
+        raw = (
+            dbutils.notebook.entry_point.getDbutils()
+            .notebook()
+            .getContext()
+            .notebookPath()
+            .get()
+        )
+    except Exception as exc:
+        raise Exception(
+            "Não foi possível descobrir o path deste notebook. "
+            "Execute via bundle/job ou informe bundle_files_path."
+        ) from exc
+
+    # notebookPath costuma retornar /Users/...; arquivos do Workspace são acessados
+    # pelo filesystem Python em /Workspace/Users/...
+    workspace_path = raw if raw.startswith("/Workspace/") else f"/Workspace{raw}"
+    marker = "/pipeline/silver/"
+    if marker not in workspace_path:
+        raise Exception(
+            f"Notebook C3 fora do layout esperado do bundle: {workspace_path}"
+        )
+    return workspace_path.split(marker, 1)[0]
+
+
 CATALOG = job_param("catalog", "varejinho_dev")
-BUNDLE_FILES_PATH = job_param(
-    "bundle_files_path",
-    "/Workspace/Users/<USER>/varejinho-data-platform",
-)
+BUNDLE_FILES_PATH = job_param("bundle_files_path", derive_bundle_files_path())
 
 if not CATALOG.endswith("_dev"):
     raise Exception(
@@ -41,9 +67,28 @@ if not CATALOG.endswith("_dev"):
 ENGINE_PATH = f"{BUNDLE_FILES_PATH}/quality/contract_engine.py"
 CONTRACT_PATH = f"{BUNDLE_FILES_PATH}/contracts/fixtures/contract_engine_fixture.yaml"
 
+print("\n=== C3 PATH RESOLUTION ===")
+print(f"bundle_files_path: {BUNDLE_FILES_PATH}")
+print(f"engine_path: {ENGINE_PATH}")
+print(f"contract_path: {CONTRACT_PATH}")
+
+if not os.path.isfile(ENGINE_PATH):
+    raise Exception(f"Engine não encontrado no bundle: {ENGINE_PATH}")
+if not os.path.isfile(CONTRACT_PATH):
+    raise Exception(f"Contrato fixture não encontrado no bundle: {CONTRACT_PATH}")
+
 spec = importlib.util.spec_from_file_location("varejinho_contract_engine", ENGINE_PATH)
+if spec is None or spec.loader is None:
+    raise Exception(f"Não foi possível carregar o engine: {ENGINE_PATH}")
 module = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(module)
+
+if not hasattr(module, "ContractValidator") or not hasattr(module, "ContractViolation"):
+    raise Exception(
+        "Engine carregado não é a versão canônica do C3. "
+        f"Path resolvido: {ENGINE_PATH}"
+    )
+
 ContractValidator = module.ContractValidator
 ContractViolation = module.ContractViolation
 
