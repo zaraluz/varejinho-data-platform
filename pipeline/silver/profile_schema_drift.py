@@ -15,6 +15,7 @@ from datetime import datetime, timezone
 
 import yaml
 from pyspark.sql import functions as F
+from pyspark.sql.types import BooleanType, IntegerType, StringType, StructField, StructType
 
 
 def job_param(nome: str, default: str) -> str:
@@ -227,7 +228,28 @@ for entity in sorted(entity_policy):
         }
     )
 
-profile_df = spark.createDataFrame(rows)
+PROFILE_SCHEMA = StructType(
+    [
+        StructField("entity", StringType(), False),
+        StructField("tier", StringType(), False),
+        StructField("runtime_group", StringType(), False),
+        StructField("current_drift_owner", StringType(), False),
+        StructField("baseline_exists", BooleanType(), False),
+        StructField("baseline_json_valid", BooleanType(), False),
+        StructField("baseline_columns", IntegerType(), False),
+        StructField("baseline_modified_utc", StringType(), True),
+        StructField("silver_exists", BooleanType(), False),
+        StructField("silver_columns", IntegerType(), False),
+        StructField("baseline_exact_vs_silver", BooleanType(), True),
+        StructField("added_vs_baseline", StringType(), False),
+        StructField("removed_vs_baseline", StringType(), False),
+        StructField("type_changes_vs_baseline", StringType(), False),
+        StructField("persisted_drift_logs", IntegerType(), False),
+        StructField("baseline_error", StringType(), True),
+    ]
+)
+
+profile_df = spark.createDataFrame(rows, schema=PROFILE_SCHEMA)
 
 print("\n=== GATE S1 — SCHEMA DRIFT INVENTORY ===")
 print(f"Catalog:           {CATALOG}")
