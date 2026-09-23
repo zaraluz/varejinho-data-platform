@@ -81,6 +81,25 @@ DRIFT = SilverSchemaDriftRuntime(
     bundle_files_path=BUNDLE_FILES_PATH,
 )
 
+PARTITION_RUNTIME_PATH = f"{BUNDLE_FILES_PATH}/quality/partition_manifest_runtime.py"
+_partition_spec = importlib.util.spec_from_file_location(
+    "varejinho_partition_manifest_runtime_sales", PARTITION_RUNTIME_PATH
+)
+if _partition_spec is None or _partition_spec.loader is None:
+    raise ImportError(
+        f"Não foi possível carregar partition manifest runtime: {PARTITION_RUNTIME_PATH}"
+    )
+_partition_module = importlib.util.module_from_spec(_partition_spec)
+_partition_spec.loader.exec_module(_partition_module)
+FactPartitionManifestRuntime = _partition_module.FactPartitionManifestRuntime
+MUTATION_GUARD = FactPartitionManifestRuntime(
+    spark=spark,
+    dbutils=dbutils,
+    control_root=CONTROL_ROOT,
+    bundle_files_path=BUNDLE_FILES_PATH,
+    bronze_source_catalog=BRONZE_SOURCE_CATALOG,
+)
+
 
 def latest_mature_partition():
     if MATURE_CUTOFF_OVERRIDE:
@@ -186,6 +205,19 @@ state = states[0]
 committed = state["last_processed_snapshot"]
 candidate = state["candidate_snapshot"]
 status = state["status"]
+
+bronze_override_for_guard = (
+    BRONZE if BRONZE != f"{CATALOG}.bronze.venda" else ""
+)
+manifest_report = MUTATION_GUARD.assert_committed(
+    "venda",
+    committed,
+    bronze_override=bronze_override_for_guard,
+)
+print(
+    f"[MUTATION_GUARD] venda: committed history verified "
+    f"| partitions={manifest_report.get('manifest_rows', 0)}"
+)
 
 if status == "PENDING_VALIDATION" and candidate is not None:
     print(
