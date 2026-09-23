@@ -31,3 +31,7 @@ quality_rules:
   - rule: not_null
     columns: [id, id_pagarfornecedor, datavencimento, valor]
     severity: error
+  - rule: referential_integrity
+    column: id_pagarfornecedor
+    references: pagarfornecedor.id
+    severity: warning
