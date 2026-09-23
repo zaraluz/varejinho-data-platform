@@ -40,6 +40,7 @@ def derive_bundle_files_path() -> str:
 CATALOG = job_param("catalog", "varejinho_dev")
 BRONZE_SOURCE_CATALOG = job_param("bronze_source_catalog", "varejinho")
 BUNDLE_FILES_PATH = job_param("bundle_files_path", derive_bundle_files_path())
+CONTROL_ROOT = job_param("control_root", "s3://varejinho-lake/_control/dev").rstrip("/")
 FACT_WATERMARK = f"{CATALOG}.control.fact_watermark"
 CONTRACT_POLICY = f"{BUNDLE_FILES_PATH}/contracts/silver/_policy.yaml"
 CONTRACT_ENGINE = f"{BUNDLE_FILES_PATH}/quality/contract_engine.py"
@@ -67,6 +68,26 @@ contract_module = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(contract_module)
 ContractValidator = contract_module.ContractValidator
 ContractViolation = contract_module.ContractViolation
+
+PARTITION_RUNTIME_PATH = f"{BUNDLE_FILES_PATH}/quality/partition_manifest_runtime.py"
+partition_spec = importlib.util.spec_from_file_location(
+    "varejinho_partition_manifest_runtime_qg",
+    PARTITION_RUNTIME_PATH,
+)
+if partition_spec is None or partition_spec.loader is None:
+    raise Exception(
+        f"Não foi possível carregar partition manifest runtime: {PARTITION_RUNTIME_PATH}"
+    )
+partition_module = importlib.util.module_from_spec(partition_spec)
+partition_spec.loader.exec_module(partition_module)
+FactPartitionManifestRuntime = partition_module.FactPartitionManifestRuntime
+MUTATION_GUARD = FactPartitionManifestRuntime(
+    spark=spark,
+    dbutils=dbutils,
+    control_root=CONTROL_ROOT,
+    bundle_files_path=BUNDLE_FILES_PATH,
+    bronze_source_catalog=BRONZE_SOURCE_CATALOG,
+)
 
 with open(CONTRACT_POLICY, "r", encoding="utf-8") as f:
     contract_policy = yaml.safe_load(f) or {}
@@ -177,6 +198,16 @@ for tabela in INCREMENTAL_FACTS:
             f"{tabela} — sem partição aberta na Silver",
             no_future,
             f"(Silver max ingestion_date: {silver_max} | mature_cutoff: {mature_cutoff})",
+        )
+
+        manifest_report = MUTATION_GUARD.assert_committed(
+            tabela,
+            committed,
+        )
+        check(
+            f"{tabela} — histórico Bronze committed imutável",
+            manifest_report["ok"],
+            f"(manifest partitions: {manifest_report.get('manifest_rows', 0)})",
         )
 
     except Exception as e:
