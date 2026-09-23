@@ -16,15 +16,26 @@ def job_param(name: str, default: str) -> str:
         return default
 
 
+def required_param(nome: str) -> str:
+    """Parâmetro obrigatório do job: falha cedo em vez de cair num default de ambiente."""
+    try:
+        value = dbutils.widgets.get(nome)
+    except Exception:
+        value = ""
+    if not value:
+        raise ValueError(
+            f"Parâmetro obrigatório ausente: '{nome}'. Execute via job do bundle, "
+            "que injeta catalog/bundle_files_path/control_root/bronze_source_catalog por target."
+        )
+    return value
+
+
 CATALOG = job_param("catalog", "varejinho_dev")
 CONTROL_ROOT = job_param(
     "control_root",
     "s3://varejinho-lake/_control/dev/r2_partition_manifest_fixture",
 ).rstrip("/")
-BUNDLE_FILES_PATH = job_param(
-    "bundle_files_path",
-    "/Workspace/Users/<USER>/varejinho-data-platform",
-)
+BUNDLE_FILES_PATH = required_param("bundle_files_path").rstrip("/")
 
 if not CATALOG.endswith("_dev"):
     raise Exception(f"R2 fixture is dev-only. Received: {CATALOG}")

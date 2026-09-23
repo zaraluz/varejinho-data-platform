@@ -32,32 +32,23 @@ def job_param(name: str, default: str) -> str:
         return default
 
 
-def resolve_bundle_files_path() -> str:
-    explicit = job_param("bundle_files_path", "")
-    if explicit:
-        return explicit.rstrip("/")
-
+def required_param(nome: str) -> str:
+    """Parâmetro obrigatório do job: falha cedo em vez de cair num default de ambiente."""
     try:
-        raw = (
-            dbutils.notebook.entry_point.getDbutils()
-            .notebook()
-            .getContext()
-            .notebookPath()
-            .get()
-        )
-        workspace_path = raw if raw.startswith("/Workspace/") else f"/Workspace{raw}"
-        marker = "/validation/schema_drift/profile_schema_drift"
-        if marker in workspace_path:
-            return workspace_path.split(marker, 1)[0]
+        value = dbutils.widgets.get(nome)
     except Exception:
-        pass
-
-    return "/Workspace/Users/<USER>/varejinho-data-platform"
+        value = ""
+    if not value:
+        raise ValueError(
+            f"Parâmetro obrigatório ausente: '{nome}'. Execute via job do bundle, "
+            "que injeta catalog/bundle_files_path/control_root/bronze_source_catalog por target."
+        )
+    return value
 
 
 CATALOG = job_param("catalog", "varejinho_dev")
 CONTROL_ROOT = job_param("control_root", "s3://varejinho-lake/_control/dev").rstrip("/")
-BUNDLE_FILES_PATH = resolve_bundle_files_path()
+BUNDLE_FILES_PATH = required_param("bundle_files_path").rstrip("/")
 REGISTRY_ROOT = f"{CONTROL_ROOT}/schema_registry"
 POLICY_PATH = f"{BUNDLE_FILES_PATH}/contracts/silver/_policy.yaml"
 ENGINE_PATH = f"{BUNDLE_FILES_PATH}/quality/schema_drift_engine.py"
