@@ -4,6 +4,7 @@
 # Falha com Exception se houver erros críticos.
 
 from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 import importlib.util
 import os
 import yaml
@@ -38,6 +39,16 @@ BRONZE_SOURCE_CATALOG = required_param("bronze_source_catalog")
 BUNDLE_FILES_PATH = required_param("bundle_files_path").rstrip("/")
 CONTROL_ROOT = required_param("control_root").rstrip("/")
 FACT_WATERMARK = f"{CATALOG}.control.fact_watermark"
+
+# Timeliness: o committed das facts não pode ficar mais de N dias atrás da data
+# de negócio atual. Em operação normal (run às 03:00 de D+1) o atraso é 1 dia.
+# Protege contra o modo de falha silencioso da regra D+1: se nenhuma partição
+# amadurecer (ex.: horário do extrator muda e a última escrita de D deixa de
+# cruzar a meia-noite UTC), committed e mature_cutoff param JUNTOS e o check de
+# alinhamento abaixo continua passando. Só a comparação com o calendário detecta.
+BUSINESS_TZ = ZoneInfo("America/Fortaleza")
+MAX_FACT_STALENESS_DAYS = int(job_param("max_fact_staleness_days", "2"))
+BUSINESS_TODAY = datetime.now(BUSINESS_TZ).date()
 CONTRACT_POLICY = f"{BUNDLE_FILES_PATH}/contracts/silver/_policy.yaml"
 CONTRACT_ENGINE = f"{BUNDLE_FILES_PATH}/quality/contract_engine.py"
 resultados = []
@@ -106,8 +117,9 @@ if len(required_contracts) != 20 or len(standard_entities) != 17:
 
 # ── Fatos incrementais por partição madura ────────────────────────────────
 # Venda e as 13 facts transacionais/financeiras usam o mesmo invariant diário:
-# watermark único e COMMITTED, candidate limpo, committed == mature_cutoff
-# e nenhuma linha da partição ainda aberta presente na Silver.
+# watermark único e COMMITTED, candidate limpo, committed == mature_cutoff,
+# committed recente em relação ao calendário (timeliness) e nenhuma linha da
+# partição ainda aberta presente na Silver.
 
 INCREMENTAL_FACTS = [
     "venda",
@@ -177,6 +189,14 @@ for tabela in INCREMENTAL_FACTS:
             state_ok,
             f"(committed: {committed} | mature_cutoff: {mature_cutoff} | "
             f"candidate: {candidate} | status: {status})",
+        )
+
+        days_behind = (BUSINESS_TODAY - committed).days if committed else None
+        check(
+            f"{tabela} — committed recente (timeliness)",
+            days_behind is not None and days_behind <= MAX_FACT_STALENESS_DAYS,
+            f"(committed: {committed} | hoje: {BUSINESS_TODAY} | atraso: {days_behind}d | "
+            f"máximo: {MAX_FACT_STALENESS_DAYS}d)",
         )
 
         silver_max = (
