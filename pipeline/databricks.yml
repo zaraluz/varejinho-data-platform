@@ -54,6 +54,20 @@ targets:
 resources:
   jobs:
 
+    gold_contas_pagar_reconciliation:
+      name: "[${bundle.target}] Varejinho — Release Diagnostic Contas Pagar"
+      max_concurrent_runs: 1
+      parameters:
+        - name: catalog
+          default: ${var.catalog}
+        - name: bronze_source_catalog
+          default: ${var.bronze_source_catalog}
+      tasks:
+        - task_key: profile_contas_pagar_reconciliation
+          notebook_task:
+            notebook_path: ${workspace.file_path}/pipeline/gold/profile_contas_pagar_reconciliation.py
+          description: "Read-only: explica diferença Silver parcela → Gold contas_pagar e separa orphan parent vs defeito downstream"
+
     partition_manifest_fixture:
       name: "[${bundle.target}] Varejinho — Gate R2 Partition Mutation Fixture"
       max_concurrent_runs: 1
