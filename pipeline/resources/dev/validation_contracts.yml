@@ -1,0 +1,24 @@
+# pipeline/resources/dev/validation_contracts.yml — provas de Data Contracts (profiling C1/C2, fixture C3).
+
+# Declarado somente em targets.dev: estes jobs NUNCA são deployados em prod.
+
+targets:
+  dev:
+    resources:
+      jobs:
+        contract_profile:
+          name: "[${bundle.target}] Varejinho — Gate C1 Data Contracts Profile"
+          tags:
+            purpose: validation
+            block: contracts
+          max_concurrent_runs: 1
+          parameters:
+            - name: catalog
+              default: ${var.catalog}
+            - name: bundle_files_path
+              default: ${workspace.file_path}
+          tasks:
+            - task_key: profile_contracts
+              notebook_task:
+                notebook_path: ${workspace.file_path}/validation/contracts/profile_contracts.py
+              description: "Inventário/lint read-only dos contratos Silver, criticidade, schema real, hardcodes e gaps de enforcement"

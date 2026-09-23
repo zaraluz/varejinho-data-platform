@@ -1,0 +1,24 @@
+# pipeline/resources/manutencao_semanal.yml — job de produção (deployado em dev e prod).
+
+resources:
+  jobs:
+    manutencao_semanal:
+      name: "[${bundle.target}] Varejinho — Manutenção Semanal"
+      tags:
+        purpose: production
+      schedule:
+        quartz_cron_expression: "0 0 2 ? * SUN"
+        timezone_id: "America/Fortaleza"
+        pause_status: PAUSED
+      email_notifications:
+        on_failure:
+          - <ALERT_EMAIL>
+      max_concurrent_runs: 1
+      parameters:
+        - name: catalog
+          default: ${var.catalog}
+      tasks:
+        - task_key: optimize_vacuum
+          notebook_task:
+            notebook_path: ${workspace.file_path}/pipeline/gold/optimize.py
+          description: "OPTIMIZE + ZORDER + VACUUM em todas as tabelas Gold"

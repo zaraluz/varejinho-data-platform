@@ -1,0 +1,184 @@
+# pipeline/resources/dev/validation_sales.yml — provas da venda incremental D+1 (D7: profiling, fixture, replay real).
+
+# Declarado somente em targets.dev: estes jobs NUNCA são deployados em prod.
+
+targets:
+  dev:
+    resources:
+      jobs:
+        sales_incremental_profile:
+          name: "[${bundle.target}] Varejinho — Gate D7A Venda Incrementality Profile"
+          tags:
+            purpose: validation
+            block: sales
+          max_concurrent_runs: 1
+          parameters:
+            - name: catalog
+              default: ${var.catalog}
+            - name: bronze_source_catalog
+              default: ${var.bronze_source_catalog}
+            - name: bundle_files_path
+              default: ${workspace.file_path}
+          tasks:
+            - task_key: profile_sales_incrementality
+              notebook_task:
+                notebook_path: ${workspace.file_path}/validation/sales/profile_sales_incrementality.py
+              description: "Diagnóstico read-only de grão, D+1, mature cutoff e contaminação da Silver venda"
+
+        sales_incremental_fixture:
+          name: "[${bundle.target}] Varejinho — Gate D7C Venda Incremental Fixture"
+          tags:
+            purpose: validation
+            block: sales
+          max_concurrent_runs: 1
+          parameters:
+            - name: catalog
+              default: ${var.catalog}
+            - name: bundle_files_path
+              default: ${workspace.file_path}
+            - name: control_root
+              default: ${var.control_root}/d7c
+          tasks:
+            - task_key: prepare_sales_incremental_fixture
+              notebook_task:
+                notebook_path: ${workspace.file_path}/validation/sales/prepare_sales_incremental_fixture.py
+              description: "Cria D1 committed, D2 madura e D3 aberta para venda"
+
+            - task_key: apply_sales_incremental_fixture
+              depends_on:
+                - task_key: prepare_sales_incremental_fixture
+              notebook_task:
+                notebook_path: ${workspace.file_path}/pipeline/silver/incremental_sales.py
+                base_parameters:
+                  bronze_table: ${var.catalog}.control._d7c_venda_bronze
+                  silver_table: ${var.catalog}.silver._d7c_venda
+                  control_table: ${var.catalog}.control._d7c_fact_watermark
+                  quarantine_table: ${var.catalog}.silver._d7c_quarantine_venda
+                  quarantine_history_table: ${var.catalog}.silver._d7c_quarantine_history_venda
+                  mature_cutoff_override: "2026-09-02"
+                  control_root: ${var.control_root}/d7c
+              description: "Aplica apenas D2 madura, deixando D3 aberta fora"
+
+            - task_key: validate_sales_incremental_fixture
+              depends_on:
+                - task_key: apply_sales_incremental_fixture
+              notebook_task:
+                notebook_path: ${workspace.file_path}/pipeline/silver/validate_mature_incremental_sales.py
+                base_parameters:
+                  bronze_table: ${var.catalog}.control._d7c_venda_bronze
+                  silver_table: ${var.catalog}.silver._d7c_venda
+                  control_table: ${var.catalog}.control._d7c_fact_watermark
+              description: "Valida payload/chaves do lote D2 antes do commit"
+
+            - task_key: commit_sales_incremental_fixture
+              depends_on:
+                - task_key: validate_sales_incremental_fixture
+              notebook_task:
+                notebook_path: ${workspace.file_path}/pipeline/silver/commit_fact_watermark.py
+                base_parameters:
+                  entity: venda
+                  bronze_table: ${var.catalog}.control._d7c_venda_bronze
+                  control_table: ${var.catalog}.control._d7c_fact_watermark
+              description: "Promove venda para D2 somente após validação"
+
+            - task_key: replay_sales_incremental_fixture
+              depends_on:
+                - task_key: commit_sales_incremental_fixture
+              notebook_task:
+                notebook_path: ${workspace.file_path}/pipeline/silver/incremental_sales.py
+                base_parameters:
+                  bronze_table: ${var.catalog}.control._d7c_venda_bronze
+                  silver_table: ${var.catalog}.silver._d7c_venda
+                  control_table: ${var.catalog}.control._d7c_fact_watermark
+                  quarantine_table: ${var.catalog}.silver._d7c_quarantine_venda
+                  quarantine_history_table: ${var.catalog}.silver._d7c_quarantine_history_venda
+                  mature_cutoff_override: "2026-09-02"
+                  control_root: ${var.control_root}/d7c
+              description: "Reexecuta o mesmo cutoff após commit; deve ser no-op"
+
+            - task_key: verify_sales_incremental_fixture
+              depends_on:
+                - task_key: replay_sales_incremental_fixture
+              notebook_task:
+                notebook_path: ${workspace.file_path}/validation/sales/verify_sales_incremental_fixture.py
+              description: "Prova D+1, insert/update, quarantine, no-open e replay no-op"
+
+        sales_incremental_real_replay:
+          name: "[${bundle.target}] Varejinho — Gate D7D Venda Real Incremental Replay"
+          tags:
+            purpose: validation
+            block: sales
+          max_concurrent_runs: 1
+          parameters:
+            - name: catalog
+              default: ${var.catalog}
+            - name: bronze_source_catalog
+              default: ${var.bronze_source_catalog}
+            - name: bundle_files_path
+              default: ${workspace.file_path}
+            - name: control_root
+              default: ${var.control_root}/d7d
+          tasks:
+            - task_key: prepare_sales_real_replay
+              notebook_task:
+                notebook_path: ${workspace.file_path}/validation/sales/prepare_sales_real_replay.py
+              description: "Cria sandbox com ids reais da última partição madura e baseline na partição madura anterior"
+
+            - task_key: apply_sales_real_replay
+              depends_on:
+                - task_key: prepare_sales_real_replay
+              notebook_task:
+                notebook_path: ${workspace.file_path}/pipeline/silver/incremental_sales.py
+                base_parameters:
+                  bronze_table: ${var.catalog}.control._d7d_venda_real_bronze
+                  silver_table: ${var.catalog}.silver._d7d_venda_real
+                  control_table: ${var.catalog}.control._d7d_venda_watermark
+                  quarantine_table: ${var.catalog}.silver._d7d_quarantine_venda
+                  quarantine_history_table: ${var.catalog}.silver._d7d_quarantine_history_venda
+                  mature_cutoff_override: "2026-09-20"
+                  control_root: ${var.control_root}/d7d
+              description: "Aplica a última partição madura real no sandbox"
+
+            - task_key: validate_sales_real_replay
+              depends_on:
+                - task_key: apply_sales_real_replay
+              notebook_task:
+                notebook_path: ${workspace.file_path}/pipeline/silver/validate_mature_incremental_sales.py
+                base_parameters:
+                  bronze_table: ${var.catalog}.control._d7d_venda_real_bronze
+                  silver_table: ${var.catalog}.silver._d7d_venda_real
+                  control_table: ${var.catalog}.control._d7d_venda_watermark
+              description: "Valida o lote real antes do commit sandbox"
+
+            - task_key: commit_sales_real_replay
+              depends_on:
+                - task_key: validate_sales_real_replay
+              notebook_task:
+                notebook_path: ${workspace.file_path}/pipeline/silver/commit_fact_watermark.py
+                base_parameters:
+                  entity: venda
+                  bronze_table: ${var.catalog}.control._d7d_venda_real_bronze
+                  control_table: ${var.catalog}.control._d7d_venda_watermark
+              description: "Promove watermark sandbox após validação real"
+
+            - task_key: replay_sales_real_replay
+              depends_on:
+                - task_key: commit_sales_real_replay
+              notebook_task:
+                notebook_path: ${workspace.file_path}/pipeline/silver/incremental_sales.py
+                base_parameters:
+                  bronze_table: ${var.catalog}.control._d7d_venda_real_bronze
+                  silver_table: ${var.catalog}.silver._d7d_venda_real
+                  control_table: ${var.catalog}.control._d7d_venda_watermark
+                  quarantine_table: ${var.catalog}.silver._d7d_quarantine_venda
+                  quarantine_history_table: ${var.catalog}.silver._d7d_quarantine_history_venda
+                  mature_cutoff_override: "2026-09-20"
+                  control_root: ${var.control_root}/d7d
+              description: "Reexecuta o mesmo lote real; deve ser no-op"
+
+            - task_key: verify_sales_real_replay
+              depends_on:
+                - task_key: replay_sales_real_replay
+              notebook_task:
+                notebook_path: ${workspace.file_path}/validation/sales/verify_sales_real_replay.py
+              description: "Compara incremental real com expected real e limpa sandbox"

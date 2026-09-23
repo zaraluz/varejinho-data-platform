@@ -1,0 +1,225 @@
+# pipeline/resources/dev/validation_facts.yml — provas das 13 facts incrementais (D1–D6: profiling, equivalência, fixtures, diagnósticos).
+
+# Declarado somente em targets.dev: estes jobs NUNCA são deployados em prod.
+
+targets:
+  dev:
+    resources:
+      jobs:
+        facts_incremental_profile:
+          name: "[${bundle.target}] Varejinho — Gate D1 Facts Incrementality Profiling"
+          tags:
+            purpose: validation
+            block: facts
+          max_concurrent_runs: 1
+          parameters:
+            - name: catalog
+              default: ${var.catalog}
+          tasks:
+            - task_key: profile_fact_incrementality
+              notebook_task:
+                notebook_path: ${workspace.file_path}/validation/facts/profile_fact_incrementality.py
+              description: "Profiling read-only de snapshots, grão, churn e cobertura antes de ligar watermark aos fatos"
+
+        facts_baseline_equivalence:
+          name: "[${bundle.target}] Varejinho — Gate D2 Facts Baseline Equivalence"
+          tags:
+            purpose: validation
+            block: facts
+          max_concurrent_runs: 1
+          parameters:
+            - name: catalog
+              default: ${var.catalog}
+            - name: bundle_files_path
+              default: ${workspace.file_path}
+          tasks:
+            - task_key: verify_fact_baseline_equivalence
+              notebook_task:
+                notebook_path: ${workspace.file_path}/validation/facts/verify_fact_baseline_equivalence.py
+              description: "Compara Bronze histórica transformada em memória com a Silver atual antes de semear watermark"
+
+        facts_incremental_fixture:
+          name: "[${bundle.target}] Varejinho — Gate D4 Facts Incremental Fixture"
+          tags:
+            purpose: validation
+            block: facts
+          max_concurrent_runs: 1
+          parameters:
+            - name: catalog
+              default: ${var.catalog}
+            - name: bundle_files_path
+              default: ${workspace.file_path}
+            - name: control_root
+              default: ${var.control_root}/d4
+          tasks:
+            - task_key: prepare_fact_incremental_fixture
+              notebook_task:
+                notebook_path: ${workspace.file_path}/validation/facts/prepare_fact_incremental_fixture.py
+              description: "Cria Bronze/Silver/control sandbox de pedido com D1 baseline e D2/D3 pendentes"
+
+            - task_key: apply_fact_incremental_fixture
+              depends_on:
+                - task_key: prepare_fact_incremental_fixture
+              notebook_task:
+                notebook_path: ${workspace.file_path}/pipeline/silver/incremental_facts.py
+                base_parameters:
+                  entity: pedido
+                  bronze_table: ${var.catalog}.control._d4_pedido_bronze
+                  silver_table: ${var.catalog}.silver._d4_pedido
+                  control_table: ${var.catalog}.control._d4_fact_watermark
+                  quarantine_table: ${var.catalog}.silver._d4_quarantine_pedido
+                  quarantine_history_table: ${var.catalog}.silver._d4_quarantine_history_pedido
+                  control_root: ${var.control_root}/d4
+                  mature_cutoff_override: "2026-09-03"
+              description: "Executa o runtime incremental genérico sobre dois snapshots pendentes em sandbox"
+
+            - task_key: validate_fact_incremental_fixture
+              depends_on:
+                - task_key: apply_fact_incremental_fixture
+              notebook_task:
+                notebook_path: ${workspace.file_path}/validation/facts/validate_incremental_facts.py
+                base_parameters:
+                  entity: pedido
+                  bronze_table: ${var.catalog}.control._d4_pedido_bronze
+                  silver_table: ${var.catalog}.silver._d4_pedido
+                  control_table: ${var.catalog}.control._d4_fact_watermark
+                  bundle_files_path: ${workspace.file_path}
+              description: "Compara sandbox incremental com full rebuild esperado até candidate"
+
+            - task_key: commit_fact_incremental_fixture_watermark
+              depends_on:
+                - task_key: validate_fact_incremental_fixture
+              notebook_task:
+                notebook_path: ${workspace.file_path}/pipeline/silver/commit_fact_watermark.py
+                base_parameters:
+                  entity: pedido
+                  bronze_table: ${var.catalog}.control._d4_pedido_bronze
+                  control_table: ${var.catalog}.control._d4_fact_watermark
+              description: "Promove watermark sandbox somente após equivalência full vs incremental"
+
+            - task_key: verify_fact_incremental_fixture
+              depends_on:
+                - task_key: commit_fact_incremental_fixture_watermark
+              notebook_task:
+                notebook_path: ${workspace.file_path}/validation/facts/verify_fact_incremental_fixture.py
+              description: "Prova update + insert + no-delete + quarantine + watermark e limpa sandbox"
+
+        facts_source_stability_diagnostic:
+          name: "[${bundle.target}] Varejinho — Gate D5A Bronze Source Stability"
+          tags:
+            purpose: validation
+            block: facts
+          max_concurrent_runs: 1
+          parameters:
+            - name: catalog
+              default: ${var.catalog}
+            - name: bundle_files_path
+              default: ${workspace.file_path}
+          tasks:
+            - task_key: diagnose_notaentradaitem_source_stability
+              notebook_task:
+                notebook_path: ${workspace.file_path}/validation/facts/diagnose_fact_source_stability.py
+                base_parameters:
+                  entity: notaentradaitem
+              description: "Explica missing/extra keys do D5 e testa evidências de mutabilidade/late write na Bronze raw"
+
+        facts_file_version_diagnostic:
+          name: "[${bundle.target}] Varejinho — Gate D5B Bronze File Versions"
+          tags:
+            purpose: validation
+            block: facts
+          max_concurrent_runs: 1
+          parameters:
+            - name: catalog
+              default: ${var.catalog}
+            - name: bronze_source_catalog
+              default: ${var.bronze_source_catalog}
+          tasks:
+            - task_key: diagnose_notaentradaitem_file_versions
+              notebook_task:
+                notebook_path: ${workspace.file_path}/validation/facts/diagnose_fact_file_versions.py
+                base_parameters:
+                  entity: notaentradaitem
+              description: "Usa _metadata da external table para relacionar ingestion_date com file path/modification time e confirmar mecanismo de mutabilidade"
+
+        facts_partition_maturity_diagnostic:
+          name: "[${bundle.target}] Varejinho — Gate D5C Fact Partition Maturity"
+          tags:
+            purpose: validation
+            block: facts
+          max_concurrent_runs: 1
+          parameters:
+            - name: catalog
+              default: ${var.catalog}
+            - name: bronze_source_catalog
+              default: ${var.bronze_source_catalog}
+          tasks:
+            - task_key: diagnose_fact_partition_maturity
+              notebook_task:
+                notebook_path: ${workspace.file_path}/validation/facts/diagnose_fact_partition_maturity.py
+              description: "Mede lag entre ingestion_date e file_modified_at nas 13 facts para decidir regra de partição fechada"
+
+        facts_maturity_fixture:
+          name: "[${bundle.target}] Varejinho — Gate D6A Mature Partition Fixture"
+          tags:
+            purpose: validation
+            block: facts
+          max_concurrent_runs: 1
+          parameters:
+            - name: catalog
+              default: ${var.catalog}
+            - name: bundle_files_path
+              default: ${workspace.file_path}
+            - name: control_root
+              default: ${var.control_root}/d6a
+          tasks:
+            - task_key: prepare_fact_maturity_fixture
+              notebook_task:
+                notebook_path: ${workspace.file_path}/validation/facts/prepare_fact_maturity_fixture.py
+              description: "Cria D1 committed, D2 madura e D3 aberta em sandbox"
+
+            - task_key: apply_mature_fact_fixture
+              depends_on:
+                - task_key: prepare_fact_maturity_fixture
+              notebook_task:
+                notebook_path: ${workspace.file_path}/pipeline/silver/incremental_facts.py
+                base_parameters:
+                  entity: pedido
+                  bronze_table: ${var.catalog}.control._d6a_pedido_bronze
+                  silver_table: ${var.catalog}.silver._d6a_pedido
+                  control_table: ${var.catalog}.control._d6a_fact_watermark
+                  quarantine_table: ${var.catalog}.silver._d6a_quarantine_pedido
+                  quarantine_history_table: ${var.catalog}.silver._d6a_quarantine_history_pedido
+                  mature_cutoff_override: "2026-09-02"
+                  control_root: ${var.control_root}/d6a
+              description: "Aplica somente D2; D3 existe na Bronze mas permanece aberta"
+
+            - task_key: validate_mature_fact_fixture
+              depends_on:
+                - task_key: apply_mature_fact_fixture
+              notebook_task:
+                notebook_path: ${workspace.file_path}/pipeline/silver/validate_mature_incremental_facts.py
+                base_parameters:
+                  entity: pedido
+                  bronze_table: ${var.catalog}.control._d6a_pedido_bronze
+                  silver_table: ${var.catalog}.silver._d6a_pedido
+                  control_table: ${var.catalog}.control._d6a_fact_watermark
+              description: "Valida o lote maduro sem exigir remoção de histórico"
+
+            - task_key: commit_mature_fact_fixture
+              depends_on:
+                - task_key: validate_mature_fact_fixture
+              notebook_task:
+                notebook_path: ${workspace.file_path}/pipeline/silver/commit_fact_watermark.py
+                base_parameters:
+                  entity: pedido
+                  bronze_table: ${var.catalog}.control._d6a_pedido_bronze
+                  control_table: ${var.catalog}.control._d6a_fact_watermark
+              description: "Promove candidate D2 somente após validação"
+
+            - task_key: verify_fact_maturity_fixture
+              depends_on:
+                - task_key: commit_mature_fact_fixture
+              notebook_task:
+                notebook_path: ${workspace.file_path}/validation/facts/verify_fact_maturity_fixture.py
+              description: "Prova que D3 aberto não entrou na Silver e limpa sandbox"
