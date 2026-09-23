@@ -111,7 +111,7 @@ class FactPartitionManifestGuard:
                                     file_path,
                                     date_format(
                                         file_modified_at,
-                                        "yyyy-MM-dd'T'HH:mm:ss.SSSSSS"
+                                        'yyyy-MM-dd HH:mm:ss.SSSSSS'
                                     )
                                 )
                             )
