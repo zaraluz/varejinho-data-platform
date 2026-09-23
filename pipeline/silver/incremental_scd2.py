@@ -518,52 +518,90 @@ def apply_type1(type1_changes):
 
 def process_snapshot(snapshot_date, previous_date, silver_columns):
     raw = spark.table(BRONZE)
-    current = raw.filter(F.col(SNAPSHOT) == F.lit(snapshot_date)).withColumn("_hash", type2_hash())
-    previous = raw.filter(F.col(SNAPSHOT) == F.lit(previous_date)).withColumn("_hash", type2_hash())
+    current = (
+        raw.filter(F.col(SNAPSHOT) == F.lit(snapshot_date))
+           .withColumn("_hash", type2_hash())
+    )
+    previous = (
+        raw.filter(F.col(SNAPSHOT) == F.lit(previous_date))
+           .withColumn("_hash", type2_hash())
+    )
 
     duplicate_groups = current.groupBy(KEY).count().filter(F.col("count") > 1).count()
     if duplicate_groups:
         raise Exception(f"Snapshot {snapshot_date}: {duplicate_groups:,} id(s) duplicados")
 
+    # Canonical comparison semantics: compare each observation with the LAST
+    # OBSERVED state of that same ID, not with the immediately previous global
+    # snapshot. This mirrors the full-backfill LAG(PARTITION BY id) behavior.
+    prior_history = (
+        raw.filter(F.col(SNAPSHOT) < F.lit(snapshot_date))
+           .withColumn("_hash", type2_hash())
+    )
+    w_prior = Window.partitionBy(KEY).orderBy(F.col(SNAPSHOT).desc())
+    prior_observed = (
+        prior_history.withColumn("_prior_rn", F.row_number().over(w_prior))
+                     .filter(F.col("_prior_rn") == 1)
+                     .drop("_prior_rn")
+    )
+
     c = current.alias("c")
-    p = previous.alias("p")
+    p = prior_observed.alias("p")
     joined = c.join(p, F.col(f"c.{KEY}") == F.col(f"p.{KEY}"), "left")
     current_cols = [F.col(f"c.{col}").alias(col) for col in current.columns]
 
-    new_ids = joined.filter(F.col(f"p.{KEY}").isNull()).select(*current_cols)
+    # First-ever observation in Bronze history.
+    first_observed = joined.filter(F.col(f"p.{KEY}").isNull()).select(*current_cols)
 
+    # Replay safety: a first-ever observation may already be present in Silver
+    # when a sandbox watermark is intentionally rewound. Treat that as already
+    # applied; a Silver ID unsupported by prior Bronze history is a hard mismatch.
     existing_seen = (
         spark.table(SILVER)
              .groupBy(KEY)
              .agg(F.max("scd_source_snapshot").alias("_max_scd_source_snapshot"))
              .withColumn("_already_in_silver", F.lit(True))
     )
-    classified_new = new_ids.join(existing_seen, on=KEY, how="left")
+    classified_first = first_observed.join(existing_seen, on=KEY, how="left")
 
-    already_applied_new = classified_new.filter(
+    already_applied_new = classified_first.filter(
         F.col("_already_in_silver").isNotNull()
         & F.col("_max_scd_source_snapshot").isNotNull()
         & (F.col("_max_scd_source_snapshot") >= F.lit(snapshot_date))
     ).count()
 
-    true_reappeared = classified_new.filter(
+    inconsistent_first = classified_first.filter(
         F.col("_already_in_silver").isNotNull()
         & (
             F.col("_max_scd_source_snapshot").isNull()
             | (F.col("_max_scd_source_snapshot") < F.lit(snapshot_date))
         )
     ).count()
-    if true_reappeared:
+    if inconsistent_first:
         raise Exception(
-            f"Snapshot {snapshot_date}: {true_reappeared:,} id(s) reapareceram após ausência; "
-            "política de reativação ainda não definida."
+            f"Snapshot {snapshot_date}: {inconsistent_first:,} id(s) aparecem como "
+            "primeira observação na Bronze, mas já existem na Silver sem evidência "
+            "de replay equivalente."
         )
 
-    new_ids = classified_new.drop("_max_scd_source_snapshot", "_already_in_silver")
+    new_ids = (
+        classified_first.filter(F.col("_already_in_silver").isNull())
+                        .drop("_max_scd_source_snapshot", "_already_in_silver")
+    )
+
+    # Reappearance is observational only: absence does not close a version.
+    # If an ID returns after a gap, it is compared to its last observed state.
+    reappeared_ids = (
+        current.select(KEY)
+               .join(previous.select(KEY), on=KEY, how="left_anti")
+               .join(prior_observed.select(KEY), on=KEY, how="inner")
+               .distinct()
+    )
+    reappeared = reappeared_ids.count()
 
     type2_changes = joined.filter(
         F.col(f"p.{KEY}").isNotNull()
-        & (F.col("c._hash") != F.col("p._hash"))
+        & (~F.col("c._hash").eqNullSafe(F.col("p._hash")))
     ).select(*current_cols)
 
     t1_expr = changed_expr("c", "p", TYPE1_COLS)
@@ -571,7 +609,11 @@ def process_snapshot(snapshot_date, previous_date, silver_columns):
         F.col(f"p.{KEY}").isNotNull() & t1_expr
     ).select(*[F.col(f"c.{col}").alias(col) for col in [KEY, *TYPE1_COLS]])
 
-    disappeared = previous.select(KEY).join(current.select(KEY), on=KEY, how="left_anti").count()
+    disappeared = (
+        previous.select(KEY)
+                .join(current.select(KEY), on=KEY, how="left_anti")
+                .count()
+    )
 
     identity_alerts = {}
     for watched in CFG["identity_watch"]:
@@ -581,11 +623,15 @@ def process_snapshot(snapshot_date, previous_date, silver_columns):
         ).count()
         identity_alerts[watched] = alerts
         if alerts:
-            print(f"⚠️ ALERTA DE IDENTIDADE: {alerts:,} mudança(s) em {watched} no snapshot {snapshot_date}")
+            print(
+                f"⚠️ ALERTA DE IDENTIDADE: {alerts:,} mudança(s) em {watched} "
+                f"no snapshot {snapshot_date}"
+            )
 
     print(f"\n--- {ENTITY} | Snapshot {snapshot_date} | anterior={previous_date} ---")
-    print(f"novos ids no delta Bronze:      {new_ids.count():,}")
+    print(f"novos ids no histórico Bronze:   {new_ids.count():,}")
     print(f"novos ids já aplicados/replay:  {already_applied_new:,}")
+    print(f"ids reaparecidos após gap:      {reappeared:,}")
     print(f"mudanças Type 2:                {type2_changes.count():,}")
     print(f"ids com mudança Type 1:         {type1_changes.select(KEY).distinct().count():,}")
     print(f"ids ausentes no snapshot:       {disappeared:,} (nenhuma ação por política)")
@@ -617,6 +663,7 @@ def process_snapshot(snapshot_date, previous_date, silver_columns):
     return {
         "new_ids": new_ids.count(),
         "already_applied_new": already_applied_new,
+        "reappeared": reappeared,
         "type2_changes": type2_changes.count(),
         "type1_changes": type1_changes.select(KEY).distinct().count(),
         "disappeared": disappeared,
