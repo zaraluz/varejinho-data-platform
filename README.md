@@ -4,7 +4,7 @@ A retail data platform reconstruction built on Databricks, PySpark, Delta Lake, 
 
 This repository documents the migration of a legacy data warehouse workflow into a governed, incremental and testable lakehouse-style platform. The focus is not only on moving data through Bronze, Silver and Gold, but on proving that each layer behaves correctly under mutable daily files, historical dimensions, temporal joins, data contracts and environment isolation.
 
-> **Current status:** the core Silver incremental architecture, SCD2 dimensions, Gold temporal joins, Data Contracts and Schema Drift are validated in `dev`. **dbt hardening is the active block** before the final Release Gate.
+> **Current status:** the core Silver incremental architecture, SCD2 dimensions, Gold temporal joins, Data Contracts, Schema Drift and dbt validation/documentation layer are validated in `dev`. **The Release Gate is now the active block.**
 
 ---
 
@@ -206,6 +206,7 @@ The project is built around explicit gates rather than "it ran without an except
 
 - **Silver Quality Gate:** `85/85` checks passed.
 - **Gold Quality Gate:** `51/51` checks passed.
+- **dbt Gold validation:** `46` data tests across `14` Gold sources -> **44 PASS / 2 WARN / 0 ERROR / 0 SKIP**; warnings are intentional business-anomaly monitors.
 - All 14 incremental facts committed through the latest mature partition in that run.
 - All 20 executable contracts were structurally compatible with the materialized Silver schema.
 - All 17 standard entities passed the simplified availability gate.
@@ -246,20 +247,16 @@ The repository intentionally keeps the evolution visible. The current architectu
 | Gold temporal model | Historical facts resolve the dimension version valid at the event date |
 | Data Contracts | Central engine, canonical YAMLs, fixtures, runtime integration and E2E validation |
 | Schema Drift | Canonical engine/runtime across all `37/37` Silver entities; explicit promotion; final registry audit passed |
-| dbt cleanup / ownership | **Active hardening block** |
+| dbt cleanup / ownership | External Gold sources, native Databricks dbt task and read-only tests/docs validated in dev |
 | Release Gate | Final diff review, prod-safe deployment and controlled smoke test |
 
 ---
 
 ## Current roadmap
 
-### 1. dbt — active
+### 1. Release Gate — active
 
-Gold is currently materialized by the PySpark/SQL pipeline, not by dbt. The dbt hardening phase will make that ownership explicit: external Gold objects should be represented honestly, while dbt focuses on testing, documentation and lineage instead of pretending to own models it does not build.
-
-### 2. Release Gate
-
-Only after dbt hardening is closed:
+Core hardening through dbt is closed. The remaining release work is:
 
 - review the full `feature/platform-hardening` -> `main` diff;
 - remove or archive temporary hardening artifacts that should not ship;
@@ -299,7 +296,7 @@ The quality gates are blocking dependencies: Gold is not rebuilt when Silver fai
 ```text
 .
 ├── contracts/          # Silver YAML contracts and contract fixtures
-├── dbt/                # dbt tests/documentation layer (hardening pending)
+├── dbt/                # read-only Gold tests/documentation/lineage layer
 ├── docs/               # project documentation / decision records
 ├── pipeline/
 │   ├── bootstrap/      # environment bootstrap and isolation validation
@@ -351,6 +348,6 @@ This reconstruction is intentionally opinionated about data reliability:
 
 ## Project status
 
-This repository is an active reconstruction/hardening project. The core incremental Silver path, SCD2 modeling, Gold temporal semantics, Data Contracts and Schema Drift have been validated in the dev environment. dbt ownership cleanup is now the active block; the final Release Gate remains intentionally open.
+This repository is an active reconstruction/hardening project. The core incremental Silver path, SCD2 modeling, Gold temporal semantics, Data Contracts, Schema Drift and dbt validation/documentation layer have been validated in the dev environment. The final Release Gate is now the active block.
 
 Built as a hands-on Data Engineering project around real retail pipeline constraints.
