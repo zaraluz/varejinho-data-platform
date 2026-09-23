@@ -7,8 +7,6 @@
 > **TL;DR**
 > I built the first data platform of a Brazilian supermarket group as its only data professional: ERP → Pentaho → CSV on S3 → Athena → Power BI. Operating it showed me where it broke: records lost at month boundaries, full reprocessing on every load, no history for master data and no quality gates. This repository is the rebuild. The hardest problem turned out to be time: knowing when a day of source data is actually complete, and making facts join the version of a product or supplier that was true *on the day the event happened*.
 
-**Status:** release candidate. Fully validated in the `dev` target (final run `707938728538043`: Silver QG 113/113, Gold QG 52/52, dbt 44 pass / 2 intentional warnings / 0 errors). Production cutover follows the merge to `main`.
-
 ---
 
 ## Contents
