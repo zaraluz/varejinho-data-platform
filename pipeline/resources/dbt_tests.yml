@@ -12,7 +12,7 @@ resources:
         pause_status: PAUSED
       email_notifications:
         on_failure:
-          - <ALERT_EMAIL>
+          - ${var.alert_email}
       max_concurrent_runs: 1
       git_source:
         git_url: https://github.com/zaraluz/varejinho-data-platform.git
@@ -32,7 +32,7 @@ resources:
             project_directory: dbt
             commands:
               - dbt test
-            warehouse_id: cefc7bd879453309
+            warehouse_id: ${var.warehouse_id}
             catalog: ${var.catalog}
             schema: gold
           description: "dbt test — testes da Gold"

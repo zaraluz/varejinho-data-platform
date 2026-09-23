@@ -9,16 +9,24 @@
 bundle:
   name: varejinho-data-platform
 
+# Variáveis de ambiente SEM default: cada target precisa declarar as suas.
+# Um target novo esquecido falha no `bundle validate` em vez de herdar prod.
 variables:
   catalog:
     description: "Unity Catalog usado pelo target"
-    default: varejinho
   bronze_source_catalog:
     description: "Catálogo que expõe a Bronze raw compartilhada"
-    default: varejinho
   control_root:
     description: "Raiz dos artefatos de controle do ambiente"
-    default: s3://varejinho-lake/_control
+  alert_email:
+    description: >-
+      Destino dos alertas de falha dos jobs. Sem default e fora do Git:
+      definir em .databricks/bundle/<target>/variable-overrides.json
+      (gitignored) ou na variável de ambiente BUNDLE_VAR_alert_email.
+  warehouse_id:
+    description: "SQL warehouse usado pela task dbt, resolvido pelo nome no deploy"
+    lookup:
+      warehouse: "Serverless Starter Warehouse"
 
 # O databricks.yml vive em pipeline/, mas a execução também precisa de
 # contracts/ e quality/. Ao sincronizar caminhos acima do bundle root,

@@ -12,7 +12,7 @@ resources:
         pause_status: PAUSED
       email_notifications:
         on_failure:
-          - <ALERT_EMAIL>
+          - ${var.alert_email}
       max_concurrent_runs: 1
       parameters:
         - name: catalog
