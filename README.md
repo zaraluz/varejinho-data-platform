@@ -93,7 +93,10 @@ The implementation preserves:
 - no-delete semantics when a key is absent from a later snapshot;
 - row-level quarantine;
 - replay/idempotency;
-- open-partition blocking.
+- open-partition blocking;
+- post-commit mutation detection for already accepted daily partitions.
+
+Each committed fact partition now has an auditable physical manifest derived from the source file set (`_metadata.file_path` + `_metadata.file_modification_time`). The runtime verifies committed history before APPLY, stages the candidate fingerprint after VALIDATE, rechecks it before COMMIT, and only then advances the watermark. A later mutation of an already committed partition therefore fails closed instead of silently escaping the forward-only watermark.
 
 **Historical dimensions** use real SCD Type 2 behavior for:
 
@@ -194,7 +197,7 @@ Validation evidence:
 - reference/snapshot preflight: `20/20` with `no_drift / ALLOW`;
 - SCD2: product, supplier and merchandising all `no_drift / ALLOW`;
 - final read-only registry audit: `37/37` baselines exact vs committed Silver, `37/37` physical column order aligned, `0` invalid baselines and `0` actionable findings;
-- final daily E2E: Silver QG `85/85`, Gold QG `51/51`.
+- final daily E2E after the D+1 mutation guard: Silver QG `99/99`, Gold QG `52/52`.
 
 ---
 
@@ -204,9 +207,11 @@ The project is built around explicit gates rather than "it ran without an except
 
 ### Latest end-to-end dev run
 
-- **Silver Quality Gate:** `85/85` checks passed.
-- **Gold Quality Gate:** `51/51` checks passed.
+- **Silver Quality Gate:** `99/99` checks passed, including 14 committed-partition mutation checks.
+- **Gold Quality Gate:** `52/52` checks passed, including exact eligible-grain reconciliation for supplier payables.
 - **dbt Gold validation:** `46` data tests across `14` Gold sources -> **44 PASS / 2 WARN / 0 ERROR / 0 SKIP**; warnings are intentional business-anomaly monitors.
+- **D+1 mutation guard:** explicit manifests bootstrapped and verified for all `14/14` incremental facts; isolated fixture `7/7`; D4 `9/9`; D7C `11/11`.
+- **Accounts payable reconciliation:** `840` Silver installments reference `653` headers absent from Bronze; the eligible Silver fact grain reconciles exactly to Gold with `0` missing and `0` extra rows.
 - All 14 incremental facts committed through the latest mature partition in that run.
 - All 20 executable contracts were structurally compatible with the materialized Silver schema.
 - All 17 standard entities passed the simplified availability gate.
@@ -217,14 +222,15 @@ Latest validated dev volumes include:
 
 | Gold fact | Rows |
 |---|---:|
-| Sales | 4,379,490 |
-| Stock movements | 21,996,338 |
-| Purchases | 245,788 |
-| Promotions | 336,061 |
-| Losses | 84,054 |
-| Offers | 78,101 |
-| Other expenses | 19,443 |
-| ABC curve snapshots | 273,158 |
+| Sales | 4,380,703 |
+| Stock movements | 22,012,923 |
+| Purchases | 246,349 |
+| Promotions | 336,395 |
+| Losses | 84,225 |
+| Offers | 78,103 |
+| Accounts payable | 75,913 |
+| Other expenses | 19,457 |
+| ABC curve snapshots | 290,344 |
 
 These numbers are validation evidence from the current dev state, not fixed business totals.
 
@@ -244,6 +250,7 @@ The repository intentionally keeps the evolution visible. The current architectu
 | Merchandising SCD2 | First-observed temporal history implemented where source timestamps do not exist |
 | Incremental facts | `venda + 13` facts moved to mature-partition processing with watermark control |
 | D+1 maturity | Open partitions blocked using file metadata evidence |
+| Post-commit mutation guard | Physical manifests for `14/14` facts; validate/commit recheck; E2E Silver QG `99/99` |
 | Gold temporal model | Historical facts resolve the dimension version valid at the event date |
 | Data Contracts | Central engine, canonical YAMLs, fixtures, runtime integration and E2E validation |
 | Schema Drift | Canonical engine/runtime across all `37/37` Silver entities; explicit promotion; final registry audit passed |
@@ -256,7 +263,7 @@ The repository intentionally keeps the evolution visible. The current architectu
 
 ### 1. Release Gate — active
 
-Core hardening through dbt is closed. The remaining release work is:
+Core hardening through dbt and the D+1 post-commit mutation guard is closed. The active Release Gate sub-block is the SCD2 reappearance policy, followed by:
 
 - review the full `feature/platform-hardening` -> `main` diff;
 - remove or archive temporary hardening artifacts that should not ship;
