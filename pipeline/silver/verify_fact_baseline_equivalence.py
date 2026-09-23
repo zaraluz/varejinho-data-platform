@@ -28,7 +28,8 @@ if not CATALOG.endswith("_dev"):
     raise Exception(f"Gate D2 só pode executar em *_dev. Recebido: {CATALOG}")
 
 
-# Mantém exatamente a configuração de transformação usada por transform_facts.py.
+# Gate D2 histórico: mantém exatamente a configuração de transformação do
+# transform_facts.py legado (removido; preservado na tag git `legacy-v0`).
 CONFIG = {
     "notaentrada": {
         "chave": ["numeronota", "id_loja", "id_fornecedor"],
@@ -106,7 +107,7 @@ CONFIG = {
 
 def aplicar_contrato_readonly(tabela, df):
     """
-    Reproduz a lógica de filtro de contrato de transform_facts.py sem gravar
+    Reproduz a lógica de filtro de contrato do transform_facts.py legado (tag `legacy-v0`) sem gravar
     quarentena. Registros inválidos saem do expected exatamente como saem
     do caminho principal.
     """
