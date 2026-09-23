@@ -455,3 +455,50 @@ The repository is intended to function as technical portfolio evidence. Credibil
 
 **Consequence**
 README updates should follow major validated gates. Pending architecture remains in the roadmap until an execution gate closes it.
+
+
+---
+
+## 2026-09-22 — Schema Drift is a control-plane decision over the accepted Silver interface
+
+**Decision**
+Use `quality/schema_drift_engine.py` as the canonical comparison/classification/promotion engine and `quality/schema_drift_runtime.py` as the active Silver adapter across all 37 entities.
+
+Runtime policy:
+- missing baseline → **FAIL CLOSED**
+- no drift → **ALLOW**
+- additive → persist event + **ALLOW WITH ACCEPTED-BASELINE PROJECTION**
+- removed column / type change / mixed breaking → persist event + **BLOCK**
+- baseline bootstrap and promotion are explicit operations only
+
+For SCD2, evaluate drift against the **Silver-shaped output interface**, not raw Bronze. Bronze columns intentionally excluded from Silver are not schema evolution of the data product.
+
+**Why**
+The previous implementation coupled observation with acceptance: detecting drift could overwrite the baseline in the same run. SCD2 also proved that raw-source comparison can create false additive events when the Silver data product intentionally materializes only a subset of upstream columns.
+
+**Consequence**
+Detection and evolution are separate governance actions. Additive source change cannot silently enter Silver, breaking change cannot pass unnoticed, and upstream fields outside the published Silver interface do not create false drift.
+
+Final evidence:
+- central fixture: **6/6**
+- D4 facts regression: **9/9**
+- D7C sales regression: **11/11**
+- reference/snapshot preflight: **20/20**
+- final coverage: **37/37 entities**
+- registry audit: **37/37 baselines exact vs Silver**, **37/37 column order aligned**, **0 invalid baselines**, **0 actionable findings**
+- daily E2E: Silver QG **85/85**, Gold QG **51/51**
+
+A synthetic `pedido` event created when the D4 fixture accidentally used the real dev control root was identified by its known event ID, removed as test pollution, and the registry was confirmed with **0 remaining events**.
+
+---
+
+## 2026-09-22 — Fixture control state must be isolated at the Job parameter boundary
+
+**Decision**
+When a Databricks Job defines a parameter also supplied by task `base_parameters`, isolated fixture roots must be set at the **Job-level parameter** that wins runtime precedence. A task-local sandbox path is not sufficient when the Job injects the production-like dev root under the same key.
+
+**Why**
+D4 initially compared a reduced synthetic `pedido` fixture schema against the real dev baseline, producing a false `mixed_breaking` event. The failure exposed parameter precedence rather than a data-product schema change.
+
+**Consequence**
+Schema Drift fixtures use their own control roots and may not write governance evidence into the real dev registry. Synthetic misrouted events are test pollution, not historical drift evidence.
