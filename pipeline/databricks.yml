@@ -54,6 +54,100 @@ targets:
 resources:
   jobs:
 
+    scd2_reappearance_fixture:
+      name: "[${bundle.target}] Varejinho — Release R3 SCD2 Reappearance Fixture"
+      max_concurrent_runs: 1
+      parameters:
+        - name: catalog
+          default: ${var.catalog}
+        - name: bundle_files_path
+          default: ${workspace.file_path}
+        - name: control_root
+          default: ${var.control_root}/r3_scd2_reappearance
+      tasks:
+        - task_key: prepare_reappearance_fixture
+          notebook_task:
+            notebook_path: ${workspace.file_path}/pipeline/silver/prepare_scd2_reappearance_fixture.py
+          description: "Cria D1-D5 sintético com gaps, SAME_TYPE2+Type1 e CHANGED_TYPE2"
+
+        - task_key: build_reappearance_baseline
+          depends_on:
+            - task_key: prepare_reappearance_fixture
+          notebook_task:
+            notebook_path: ${workspace.file_path}/pipeline/silver/build_scd2_supplier.py
+            base_parameters:
+              bronze_table: ${var.catalog}.control._r3_supplier_reappearance_baseline_bronze
+              silver_table: ${var.catalog}.silver._r3_supplier_reappearance_incremental
+          description: "Constrói baseline incremental somente em D1"
+
+        - task_key: build_reappearance_expected
+          depends_on:
+            - task_key: prepare_reappearance_fixture
+          notebook_task:
+            notebook_path: ${workspace.file_path}/pipeline/silver/build_scd2_supplier.py
+            base_parameters:
+              bronze_table: ${var.catalog}.control._r3_supplier_reappearance_full_bronze
+              silver_table: ${var.catalog}.silver._r3_supplier_reappearance_expected
+          description: "Full backfill D1-D5 independente usado como referência"
+
+        - task_key: validate_reappearance_expected
+          depends_on:
+            - task_key: build_reappearance_expected
+          notebook_task:
+            notebook_path: ${workspace.file_path}/pipeline/silver/validate_scd2_supplier.py
+            base_parameters:
+              bronze_table: ${var.catalog}.control._r3_supplier_reappearance_full_bronze
+              silver_table: ${var.catalog}.silver._r3_supplier_reappearance_expected
+          description: "Valida invariantes do full backfill de referência"
+
+        - task_key: bootstrap_reappearance_drift
+          depends_on:
+            - task_key: build_reappearance_baseline
+          notebook_task:
+            notebook_path: ${workspace.file_path}/pipeline/silver/bootstrap_scd2_reappearance_drift.py
+          description: "Cria baseline de Schema Drift apenas no control_root sandbox R3"
+
+        - task_key: apply_reappearance_incremental
+          depends_on:
+            - task_key: bootstrap_reappearance_drift
+          notebook_task:
+            notebook_path: ${workspace.file_path}/pipeline/silver/incremental_scd2.py
+            base_parameters:
+              entity: fornecedor
+              bronze_table: ${var.catalog}.control._r3_supplier_reappearance_full_bronze
+              silver_table: ${var.catalog}.silver._r3_supplier_reappearance_incremental
+              control_table: ${var.catalog}.control._r3_supplier_reappearance_watermark
+          description: "Processa D2-D5 comparando cada ID com sua última observação"
+
+        - task_key: validate_reappearance_incremental
+          depends_on:
+            - task_key: apply_reappearance_incremental
+          notebook_task:
+            notebook_path: ${workspace.file_path}/pipeline/silver/validate_scd2_supplier.py
+            base_parameters:
+              bronze_table: ${var.catalog}.control._r3_supplier_reappearance_full_bronze
+              silver_table: ${var.catalog}.silver._r3_supplier_reappearance_incremental
+          description: "Valida invariantes SCD2 do resultado incremental"
+
+        - task_key: commit_reappearance_watermark
+          depends_on:
+            - task_key: validate_reappearance_incremental
+          notebook_task:
+            notebook_path: ${workspace.file_path}/pipeline/silver/commit_scd2_watermark.py
+            base_parameters:
+              entity: fornecedor
+              bronze_table: ${var.catalog}.control._r3_supplier_reappearance_full_bronze
+              control_table: ${var.catalog}.control._r3_supplier_reappearance_watermark
+          description: "Promove watermark sandbox somente após validação"
+
+        - task_key: verify_reappearance_equivalence
+          depends_on:
+            - task_key: commit_reappearance_watermark
+            - task_key: validate_reappearance_expected
+          notebook_task:
+            notebook_path: ${workspace.file_path}/pipeline/silver/verify_scd2_reappearance_fixture.py
+          description: "Prova equivalência exata incremental vs full backfill e limpa sandbox"
+
     scd2_reappearance_profile:
       name: "[${bundle.target}] Varejinho — Release R3 SCD2 Reappearance Profile"
       max_concurrent_runs: 1
