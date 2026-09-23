@@ -54,6 +54,20 @@ targets:
 resources:
   jobs:
 
+    scd2_reappearance_profile:
+      name: "[${bundle.target}] Varejinho — Release R3 SCD2 Reappearance Profile"
+      max_concurrent_runs: 1
+      parameters:
+        - name: catalog
+          default: ${var.catalog}
+        - name: bronze_source_catalog
+          default: ${var.bronze_source_catalog}
+      tasks:
+        - task_key: profile_scd2_reappearance
+          notebook_task:
+            notebook_path: ${workspace.file_path}/pipeline/silver/profile_scd2_reappearance.py
+          description: "Read-only: mede IDs que somem e reaparecem e compara estado atual vs última observação"
+
     gold_contas_pagar_reconciliation:
       name: "[${bundle.target}] Varejinho — Release Diagnostic Contas Pagar"
       max_concurrent_runs: 1
