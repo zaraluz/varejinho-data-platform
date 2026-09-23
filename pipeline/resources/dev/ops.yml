@@ -1036,3 +1036,22 @@ targets:
               notebook_task:
                 notebook_path: ${workspace.file_path}/ops/repair/verify_sales_maturity_repair.py
               description: "Confirma venda COMMITTED no mature_cutoff e zero open rows"
+
+        schema_drift_baseline_bootstrap:
+          name: "[${bundle.target}] Varejinho — Ops S3A Schema Drift Baseline Bootstrap"
+          tags:
+            purpose: ops
+            block: schema_drift
+          max_concurrent_runs: 1
+          parameters:
+            - name: catalog
+              default: ${var.catalog}
+            - name: bundle_files_path
+              default: ${workspace.file_path}
+            - name: control_root
+              default: ${var.control_root}
+          tasks:
+            - task_key: bootstrap_schema_drift_baselines
+              notebook_task:
+                notebook_path: ${workspace.file_path}/ops/seed/bootstrap_schema_drift_baselines.py
+              description: "One-time: cria baselines ausentes a partir da Silver validada; nunca sobrescreve existentes"
