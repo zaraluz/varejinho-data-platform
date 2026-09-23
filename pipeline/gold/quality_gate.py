@@ -318,10 +318,32 @@ check_temporal_mapping(
     "dim_fornecedor", "id_fornecedor", "sk_fornecedor",
 )
 
-silver = spark.table(f"{CATALOG}.silver.pagarfornecedorparcela").count()
-gold   = df.count()
-check("fato_contas_pagar — volumetria", gold >= silver * 0.99,
-      f"(Silver: {silver:,} | Gold: {gold:,})")
+silver_total = parcela.count()
+eligible_ids = contas_src.select("id_parcela").distinct()
+gold_ids = df.select("id_parcela").distinct()
+
+eligible = eligible_ids.count()
+gold = gold_ids.count()
+orphans = silver_total - eligible
+missing_gold = eligible_ids.join(gold_ids, on="id_parcela", how="left_anti").count()
+extra_gold = gold_ids.join(eligible_ids, on="id_parcela", how="left_anti").count()
+
+check(
+    "fato_contas_pagar — reconciliação elegível exata",
+    gold == eligible and missing_gold == 0 and extra_gold == 0,
+    (
+        f"(Silver total: {silver_total:,} | elegíveis: {eligible:,} | "
+        f"órfãs sem cabeçalho: {orphans:,} | Gold: {gold:,} | "
+        f"missing elegível: {missing_gold:,} | extra Gold: {extra_gold:,})"
+    ),
+)
+
+if orphans:
+    print(
+        f"⚠️ fato_contas_pagar source limitation: {orphans:,} parcela(s) Silver "
+        "não possuem pagarfornecedor correspondente e, por definição do INNER JOIN, "
+        "não são elegíveis para a Gold."
+    )
 
 # ── fato_outras_despesas ─────────────────────────────────────
 df = spark.table(f"{CATALOG}.gold.fato_outras_despesas")
