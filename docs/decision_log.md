@@ -547,3 +547,21 @@ Freshness and exposure metadata are useful only when they describe real runtime 
 
 **Consequence**
 The current dbt block is considered complete without source freshness or a Power BI exposure. Those features become follow-up work when the underlying runtime signals/dependencies exist.
+
+
+---
+
+## 2026-09-23 — Gold payable reconciliation is against the eligible fact grain
+
+**Decision**
+For `fato_contas_pagar`, reconcile Gold exactly against the Silver installment rows that have a matching `pagarfornecedor` header, using the actual fact grain `(id_parcela, id_loja)`. Do not compare Gold against all installments with an arbitrary percentage tolerance.
+
+Track `pagarfornecedorparcela.id_pagarfornecedor -> pagarfornecedor.id` as a non-blocking referential-integrity warning in the Silver contract. In the Gold Quality Gate, fail if an orphan installment references a parent that exists in Bronze but is missing from Silver; if the parent is absent from Bronze as well, classify it as a source limitation.
+
+**Why**
+The Release Gate diagnostic found **840** Silver installments without a matching header, spanning **653** missing parent IDs. All **840** missing parents are absent from Bronze; none represent a parent present in Bronze but lost by Silver. The eligible Silver set has **75,913** rows and Gold has exactly **75,913** rows, with **0 eligible rows missing** and **0 extra Gold rows**.
+
+The previous check (`Gold >= 99% of all Silver installments`) mixed pipeline correctness with source completeness and could pass or fail merely as the orphan ratio crossed an arbitrary threshold.
+
+**Consequence**
+Gold correctness is now fail-closed on exact eligible-grain reconciliation. Source-level orphan installments remain visible through contract warnings and the Gold source-provenance check, without being misclassified as a Gold transformation defect.
