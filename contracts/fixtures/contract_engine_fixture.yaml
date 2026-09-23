@@ -1,0 +1,36 @@
+table: contract_engine_fixture
+owner: zara.louise
+description: Fixture controlada para validar PASS, QUARANTINE, WARNING e FAIL do contract engine
+grain: [id]
+
+columns:
+  - name: id
+    type: string
+    nullable: false
+    unique: true
+  - name: event_time
+    type: timestamp
+    nullable: false
+  - name: id_loja
+    type: string
+    nullable: false
+  - name: amount
+    type: "decimal(14,2)"
+    nullable: false
+    min: 0
+
+quality_rules:
+  - rule: no_duplicates
+    key: [id]
+    severity: error
+  - rule: not_null
+    columns: [id, event_time, id_loja, amount]
+    severity: error
+  - rule: referential_integrity
+    column: id_loja
+    references: loja.id
+    severity: warning
+  - rule: freshness
+    column: event_time
+    max_age_hours: 24
+    severity: warning

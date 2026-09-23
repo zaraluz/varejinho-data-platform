@@ -1,19 +1,32 @@
-table: varejinho.silver.produto
+table: produto
 owner: zara.louise
 description: Cadastro de produtos com SCD Tipo 2 - versoes historicas preservadas
 sla_freshness_hours: 24
-grain: [id, valid_from]
+grain:
+  - id
+  - valid_from
 
 columns:
-  - {name: id,               type: int,       nullable: false}
-  - {name: descricao,        type: string,    nullable: false}
-  - {name: id_mercadologico, type: int,       nullable: false}
-  - {name: situacao,         type: int,       nullable: false}
-  - {name: valid_from,       type: timestamp, nullable: false}
-  - {name: valid_to,         type: timestamp, nullable: true}
-  - {name: is_current,       type: boolean,   nullable: false}
-  - {name: hash_versao,      type: string,    nullable: false}
+  - name: id
+    type: string
+    nullable: false
+  - name: valid_from
+    type: timestamp
+    nullable: false
+  - name: valid_to
+    type: timestamp
+    nullable: true
+  - name: is_current
+    type: boolean
+    nullable: false
+  - name: hash_versao
+    type: string
+    nullable: false
 
 quality_rules:
-  - {rule: no_duplicates, key: [id, valid_from],   severity: error}
-  - {rule: not_null,      columns: [id, descricao, id_mercadologico, valid_from, is_current, hash_versao], severity: error}
+  - rule: no_duplicates
+    key: [id, valid_from]
+    severity: error
+  - rule: not_null
+    columns: [id, valid_from, is_current, hash_versao]
+    severity: error

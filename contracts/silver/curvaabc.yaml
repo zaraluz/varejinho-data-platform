@@ -1,0 +1,43 @@
+table: curvaabc
+owner: zara.louise
+description: Classificacao ABC historica por produto, loja e snapshot
+grain:
+  - id_produto
+  - id_loja
+  - snapshot_date
+
+columns:
+  - name: id_produto
+    type: int
+    nullable: false
+  - name: id_loja
+    type: int
+    nullable: false
+  - name: snapshot_date
+    type: date
+    nullable: false
+  - name: quantidade
+    type: "decimal(14,3)"
+    nullable: true
+  - name: valortotal
+    type: "decimal(14,2)"
+    nullable: true
+  - name: lucro
+    type: "decimal(14,2)"
+    nullable: true
+
+quality_rules:
+  - rule: no_duplicates
+    key: [id_produto, id_loja, snapshot_date]
+    severity: error
+  - rule: not_null
+    columns: [id_produto, id_loja, snapshot_date]
+    severity: error
+  - rule: referential_integrity
+    column: id_produto
+    references: produto.id
+    severity: warning
+  - rule: referential_integrity
+    column: id_loja
+    references: loja.id
+    severity: warning

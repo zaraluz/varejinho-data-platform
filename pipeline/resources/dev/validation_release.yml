@@ -1,0 +1,26 @@
+# pipeline/resources/dev/validation_release.yml — provas do Release Gate (R2 partition mutation guard).
+
+# Declarado somente em targets.dev: estes jobs NUNCA são deployados em prod.
+
+targets:
+  dev:
+    resources:
+      jobs:
+        partition_manifest_fixture:
+          name: "[${bundle.target}] Varejinho — Gate R2 Partition Mutation Fixture"
+          tags:
+            purpose: validation
+            block: release
+          max_concurrent_runs: 1
+          parameters:
+            - name: catalog
+              default: ${var.catalog}
+            - name: bundle_files_path
+              default: ${workspace.file_path}
+            - name: control_root
+              default: ${var.control_root}/r2_partition_manifest_fixture
+          tasks:
+            - task_key: fixture_partition_manifest
+              notebook_task:
+                notebook_path: ${workspace.file_path}/validation/release/fixture_partition_manifest.py
+              description: "Prova bootstrap, replay e bloqueio de mutação pós-commit / entre validate e commit"

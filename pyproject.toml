@@ -1,0 +1,42 @@
+# Configuração de ferramentas do repositório.
+# Este projeto não é instalado como pacote: o código roda como notebooks/arquivos
+# sincronizados pelo Databricks Asset Bundle (pipeline/databricks.yml). O
+# pyproject.toml existe para fixar a versão de Python e as regras de lint/teste
+# que o CI vai usar.
+
+[project]
+name = "varejinho-data-platform"
+version = "1.0.0.dev0"
+description = "Retail lakehouse on Databricks: incremental Silver, SCD2, temporal Gold, data contracts and schema drift controls."
+requires-python = ">=3.11"
+readme = "README.md"
+
+[project.optional-dependencies]
+dev = [
+    "ruff>=0.6",
+    "pytest>=8",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+# Globais injetados pelo runtime do Databricks em notebooks.
+builtins = ["spark", "dbutils", "display", "displayHTML"]
+extend-exclude = [
+    "dbt/target",
+    "dbt/dbt_packages",
+    "pipeline/.databricks",
+]
+
+[tool.ruff.lint]
+# E/W: estilo PEP 8 | F: erros reais (nomes indefinidos, imports não usados)
+# I: ordem de imports | B: bugs comuns | UP: sintaxe moderna de Python
+select = ["E", "W", "F", "I", "B", "UP"]
+
+[tool.ruff.lint.per-file-ignores]
+# Notebooks Databricks: imports ficam em células depois do cabeçalho
+# "# Databricks notebook source", então E402 (import fora do topo) é esperado.
+"pipeline/**/*.py" = ["E402"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

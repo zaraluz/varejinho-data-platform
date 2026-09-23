@@ -1,0 +1,94 @@
+# pipeline/resources/dev/validation_gold.yml — provas da Gold (semântica temporal, boundaries, apply temporal, reconciliação contas a pagar).
+
+# Declarado somente em targets.dev: estes jobs NUNCA são deployados em prod.
+
+targets:
+  dev:
+    resources:
+      jobs:
+        gold_contas_pagar_reconciliation:
+          name: "[${bundle.target}] Varejinho — Release Diagnostic Contas Pagar"
+          tags:
+            purpose: validation
+            block: gold
+          max_concurrent_runs: 1
+          parameters:
+            - name: catalog
+              default: ${var.catalog}
+            - name: bronze_source_catalog
+              default: ${var.bronze_source_catalog}
+          tasks:
+            - task_key: profile_contas_pagar_reconciliation
+              notebook_task:
+                notebook_path: ${workspace.file_path}/validation/gold/profile_contas_pagar_reconciliation.py
+              description: "Read-only: explica diferença Silver parcela → Gold contas_pagar e separa orphan parent vs defeito downstream"
+
+        gold_temporal_profile:
+          name: "[${bundle.target}] Varejinho — Gate G1 Gold Temporal Profile"
+          tags:
+            purpose: validation
+            block: gold
+          max_concurrent_runs: 1
+          parameters:
+            - name: catalog
+              default: ${var.catalog}
+          tasks:
+            - task_key: profile_gold_temporal_semantics
+              notebook_task:
+                notebook_path: ${workspace.file_path}/validation/gold/profile_temporal_semantics.py
+              description: "Compara join atual vs temporal nas facts candidatas sem alterar Gold"
+
+        gold_temporal_boundary_profile:
+          name: "[${bundle.target}] Varejinho — Gate G2 Temporal Boundary Profile"
+          tags:
+            purpose: validation
+            block: gold
+          max_concurrent_runs: 1
+          parameters:
+            - name: catalog
+              default: ${var.catalog}
+          tasks:
+            - task_key: profile_before_first_boundaries
+              notebook_task:
+                notebook_path: ${workspace.file_path}/validation/gold/profile_temporal_boundaries.py
+              description: "Explica eventos anteriores à primeira versão SCD2 sem alterar Silver/Gold"
+
+        gold_temporal_apply:
+          name: "[${bundle.target}] Varejinho — Gold Temporal Apply"
+          tags:
+            purpose: validation
+            block: gold
+          max_concurrent_runs: 1
+          parameters:
+            - name: catalog
+              default: ${var.catalog}
+            - name: bundle_files_path
+              default: ${workspace.file_path}
+            - name: bronze_source_catalog
+              default: ${var.bronze_source_catalog}
+          tasks:
+            - task_key: guard_dev_only
+              notebook_task:
+                notebook_path: ${workspace.file_path}/validation/gold/guard_temporal_apply.py
+              description: "Bloqueia execução fora de catálogo *_dev durante hardening"
+
+            - task_key: rebuild_gold_dimensions
+              depends_on:
+                - task_key: guard_dev_only
+              notebook_task:
+                notebook_path: ${workspace.file_path}/pipeline/gold/build_dimensions.py
+              description: "Recria somente as dimensões Gold a partir da Silver SCD2 já aprovada"
+
+            - task_key: rebuild_gold_facts
+              depends_on:
+                - task_key: rebuild_gold_dimensions
+              notebook_task:
+                notebook_path: ${workspace.file_path}/pipeline/gold/build_facts.py
+              description: "Recria os fatos Gold com os joins temporais aprovados"
+
+            - task_key: validate_gold_temporal
+              depends_on:
+                - task_key: rebuild_gold_facts
+              notebook_task:
+                notebook_path: ${workspace.file_path}/pipeline/gold/quality_gate.py
+              description: "Valida SKs temporais, overlaps, unresolved explicados e invariantes Gold"

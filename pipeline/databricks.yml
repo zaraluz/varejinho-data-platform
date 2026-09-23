@@ -1,10 +1,48 @@
 # pipeline/databricks.yml
+# Raiz do bundle: identidade, variáveis, sync e targets.
+#
+# Os jobs vivem em resources/:
+#   resources/*.yml      -> jobs de produção (pipeline_diario, manutencao_semanal, dbt_tests),
+#                           deployados em dev e em prod
+#   resources/dev/*.yml  -> jobs de operação (ops/) e de prova (validation/), declarados
+#                           somente em targets.dev: nunca existem em prod
 bundle:
   name: varejinho-data-platform
 
+# Variáveis de ambiente SEM default: cada target precisa declarar as suas.
+# Um target novo esquecido falha no `bundle validate` em vez de herdar prod.
 variables:
   catalog:
-    default: varejinho
+    description: "Unity Catalog usado pelo target"
+  bronze_source_catalog:
+    description: "Catálogo que expõe a Bronze raw compartilhada"
+  control_root:
+    description: "Raiz dos artefatos de controle do ambiente"
+  alert_email:
+    description: >-
+      Destino dos alertas de falha dos jobs. Sem default e fora do Git:
+      definir em .databricks/bundle/<target>/variable-overrides.json
+      (gitignored) ou na variável de ambiente BUNDLE_VAR_alert_email.
+  warehouse_id:
+    description: "SQL warehouse usado pela task dbt, resolvido pelo nome no deploy"
+    lookup:
+      warehouse: "Serverless Starter Warehouse"
+
+# O databricks.yml vive em pipeline/, mas a execução também precisa de
+# contracts/, quality/, ops/, validation/ e dbt/. Ao sincronizar caminhos acima do bundle root,
+# o CLI preserva a estrutura do repositório no workspace.
+sync:
+  paths:
+    - .
+    - ../contracts
+    - ../quality
+    - ../ops
+    - ../validation
+    - ../dbt
+
+include:
+  - resources/*.yml
+  - resources/dev/*.yml
 
 targets:
   dev:
@@ -12,127 +50,36 @@ targets:
     default: true
     variables:
       catalog: varejinho_dev
+      bronze_source_catalog: varejinho
+      control_root: s3://varejinho-lake/_control/dev
+
   prod:
     mode: production
+    # Arquivos de prod ficam numa pasta restrita (não em /Workspace/Shared, que
+    # qualquer usuário do workspace pode editar: alguém alteraria um notebook que
+    # o service principal executa com privilégios de produção).
+    workspace:
+      root_path: /Workspace/Users/${workspace.current_user.userName}/.bundle/${bundle.name}/${bundle.target}
+    # Jobs de prod executam como identidade de máquina (menor privilégio,
+    # independente da conta pessoal). Quem faz o deploy continua sendo a autora.
+    run_as:
+      service_principal_name: bf71079b-64e1-4763-8b86-1e90718d8864  # sp-varejinho-pipeline-prod
+    # Permissões de topo valem para os jobs e para a pasta do bundle:
+    # a autora gerencia; o service principal só lê os arquivos que executa.
+    permissions:
+      - user_name: ${workspace.current_user.userName}
+        level: CAN_MANAGE
+      - service_principal_name: bf71079b-64e1-4763-8b86-1e90718d8864
+        level: CAN_VIEW
     variables:
       catalog: varejinho
-
-resources:
-  jobs:
-
-    pipeline_diario:
-      name: "[${bundle.target}] Varejinho — Pipeline Diário"
-      schedule:
-        quartz_cron_expression: "0 0 7,13,21 * * ?"
-        timezone_id: "America/Fortaleza"
-        pause_status: UNPAUSED
-      email_notifications:
-        on_failure:
-          - <ALERT_EMAIL>
-      max_concurrent_runs: 1
-      tasks:
-        - task_key: bronze_quality_gate
-          notebook_task:
-            notebook_path: ${workspace.file_path}/bronze/quality_gate.py
-          description: "Valida Bronze antes de processar Silver"
-
-        - task_key: silver_dimensions
-          depends_on:
-            - task_key: bronze_quality_gate
-          notebook_task:
-            notebook_path: ${workspace.file_path}/silver/transform_dimensions.py
-          description: "SCD2 dimensões + SCD1 domínios + curvaabc snapshot"
-
-        - task_key: silver_sales
-          depends_on:
-            - task_key: bronze_quality_gate
-          notebook_task:
-            notebook_path: ${workspace.file_path}/silver/transform_sales.py
-          description: "Processa silver.venda com cast, contrato e schema drift"
-
-        - task_key: silver_facts
-          depends_on:
-            - task_key: bronze_quality_gate
-          notebook_task:
-            notebook_path: ${workspace.file_path}/silver/transform_facts.py
-          description: "Fatos transacionais e financeiros"
-
-        - task_key: silver_quality_gate
-          depends_on:
-            - task_key: silver_dimensions
-            - task_key: silver_sales
-            - task_key: silver_facts
-          notebook_task:
-            notebook_path: ${workspace.file_path}/silver/quality_gate.py
-          description: "Valida Silver antes de construir Gold"
-
-        - task_key: gold_dimensions
-          depends_on:
-            - task_key: silver_quality_gate
-          notebook_task:
-            notebook_path: ${workspace.file_path}/gold/build_dimensions.py
-          description: "Dimensões da Gold"
-
-        - task_key: gold_facts
-          depends_on:
-            - task_key: silver_quality_gate
-            - task_key: gold_dimensions
-          notebook_task:
-            notebook_path: ${workspace.file_path}/gold/build_facts.py
-          description: "Fatos da Gold"
-
-        - task_key: gold_quality_gate
-          depends_on:
-            - task_key: gold_facts
-          notebook_task:
-            notebook_path: ${workspace.file_path}/gold/quality_gate.py
-          description: "35 checks — falha bloqueia e envia alerta"
-
-    manutencao_semanal:
-      name: "[${bundle.target}] Varejinho — Manutenção Semanal"
-      schedule:
-        quartz_cron_expression: "0 0 2 ? * SUN"
-        timezone_id: "America/Fortaleza"
-        pause_status: UNPAUSED
-      email_notifications:
-        on_failure:
-          - <ALERT_EMAIL>
-      max_concurrent_runs: 1
-      tasks:
-        - task_key: optimize_vacuum
-          notebook_task:
-            notebook_path: ${workspace.file_path}/gold/optimize.py
-          description: "OPTIMIZE + ZORDER + VACUUM em todas as tabelas Gold"
-
-    dbt_tests:
-      name: "[${bundle.target}] Varejinho — dbt Tests"
-      schedule:
-        quartz_cron_expression: "0 0 8,14,22 * * ?"
-        timezone_id: "America/Fortaleza"
-        pause_status: UNPAUSED
-      email_notifications:
-        on_failure:
-          - <ALERT_EMAIL>
-      max_concurrent_runs: 1
-      git_source:
-        git_url: https://github.com/zaraluz/varejinho-data-platform.git
-        git_provider: gitHub
-        git_branch: ${bundle.git.branch}
-      environments:
-        - environment_key: dbt_env
-          spec:
-            environment_version: "4"
-            dependencies:
-              - "dbt-databricks>=1.8.0,<2.0.0"
-      tasks:
-        - task_key: dbt_test
-          environment_key: dbt_env
-          dbt_task:
-            source: GIT
-            project_directory: dbt
-            commands:
-              - dbt test
-            warehouse_id: cefc7bd879453309
-            catalog: varejinho
-            schema: gold
-          description: "dbt test — 7 testes singulares da Gold"
+      bronze_source_catalog: varejinho
+      control_root: s3://varejinho-lake/_control
+    resources:
+      jobs:
+        pipeline_diario:
+          schedule:
+            pause_status: PAUSED
+        manutencao_semanal:
+          schedule:
+            pause_status: PAUSED

@@ -1,0 +1,1071 @@
+# pipeline/resources/dev/ops.yml — operações one-off e destrutivas (bootstrap, backfill, seed, repair, catch-up real).
+
+# Declarado somente em targets.dev: estes jobs NUNCA são deployados em prod.
+
+targets:
+  dev:
+    resources:
+      jobs:
+        partition_manifest_bootstrap:
+          name: "[${bundle.target}] Varejinho — Gate R2 Partition Manifest Bootstrap"
+          tags:
+            purpose: ops
+            block: release
+          max_concurrent_runs: 1
+          parameters:
+            - name: catalog
+              default: ${var.catalog}
+            - name: bronze_source_catalog
+              default: ${var.bronze_source_catalog}
+            - name: bundle_files_path
+              default: ${workspace.file_path}
+            - name: control_root
+              default: ${var.control_root}
+          tasks:
+            - task_key: bootstrap_fact_partition_manifests
+              notebook_task:
+                notebook_path: ${workspace.file_path}/ops/seed/bootstrap_fact_partition_manifests.py
+              description: "Bootstrap explícito dos manifests das 14 facts até o watermark committed atual"
+
+        bootstrap_environment:
+          name: "[${bundle.target}] Varejinho — Bootstrap Ambiente"
+          tags:
+            purpose: ops
+            block: environment
+          max_concurrent_runs: 1
+          parameters:
+            - name: catalog
+              default: ${var.catalog}
+            - name: bronze_source_catalog
+              default: ${var.bronze_source_catalog}
+          tasks:
+            - task_key: register_bronze
+              notebook_task:
+                notebook_path: ${workspace.file_path}/ops/bootstrap/ingest_bronze.py
+              description: "Cria catálogo/schemas; prod registra Bronze external, dev cria views read-only sobre a Bronze raw"
+
+            - task_key: validate_isolation
+              depends_on:
+                - task_key: register_bronze
+              notebook_task:
+                notebook_path: ${workspace.file_path}/ops/bootstrap/validate_environment.py
+              description: "Prova que Bronze dev referencia o raw e que escritas Silver permanecem isoladas"
+
+        scd2_supplier_build:
+          name: "[${bundle.target}] Varejinho — Gate B7D Supplier SCD2"
+          tags:
+            purpose: ops
+            block: scd2
+          max_concurrent_runs: 1
+          parameters:
+            - name: catalog
+              default: ${var.catalog}
+          tasks:
+            - task_key: rebuild_supplier_history
+              notebook_task:
+                notebook_path: ${workspace.file_path}/ops/backfill/build_scd2_supplier.py
+              description: "Reconstrói fornecedor SCD2 real em dev após aprovação da fixture"
+
+            - task_key: validate_supplier_history
+              depends_on:
+                - task_key: rebuild_supplier_history
+              notebook_task:
+                notebook_path: ${workspace.file_path}/pipeline/silver/validate_scd2_supplier.py
+              description: "Valida invariantes do fornecedor SCD2 real"
+
+        scd2_supplier_incremental:
+          name: "[${bundle.target}] Varejinho — Gate B7F Supplier SCD2 Incremental"
+          tags:
+            purpose: ops
+            block: scd2
+          max_concurrent_runs: 1
+          parameters:
+            - name: catalog
+              default: ${var.catalog}
+            - name: bundle_files_path
+              default: ${workspace.file_path}
+            - name: control_root
+              default: ${var.control_root}
+          tasks:
+            - task_key: apply_incremental_supplier_scd2
+              notebook_task:
+                notebook_path: ${workspace.file_path}/pipeline/silver/incremental_scd2.py
+                base_parameters:
+                  entity: fornecedor
+              description: "Processa somente snapshots novos de fornecedor com o engine SCD2 reutilizável"
+
+            - task_key: validate_incremental_supplier_scd2
+              depends_on:
+                - task_key: apply_incremental_supplier_scd2
+              notebook_task:
+                notebook_path: ${workspace.file_path}/pipeline/silver/validate_scd2_supplier.py
+              description: "Revalida os invariantes do fornecedor antes de avançar watermark"
+
+            - task_key: commit_supplier_watermark
+              depends_on:
+                - task_key: validate_incremental_supplier_scd2
+              notebook_task:
+                notebook_path: ${workspace.file_path}/pipeline/silver/commit_scd2_watermark.py
+                base_parameters:
+                  entity: fornecedor
+              description: "Promove candidate para committed somente após Quality Gate"
+
+        scd2_mercadologico_build:
+          name: "[${bundle.target}] Varejinho — Gate B8C Mercadologico SCD2"
+          tags:
+            purpose: ops
+            block: scd2
+          max_concurrent_runs: 1
+          parameters:
+            - name: catalog
+              default: ${var.catalog}
+          tasks:
+            - task_key: rebuild_mercadologico_history
+              notebook_task:
+                notebook_path: ${workspace.file_path}/ops/backfill/build_scd2_mercadologico.py
+              description: "Reconstrói mercadologico com valid_from no primeiro snapshot observado"
+
+            - task_key: validate_mercadologico_history
+              depends_on:
+                - task_key: rebuild_mercadologico_history
+              notebook_task:
+                notebook_path: ${workspace.file_path}/pipeline/silver/validate_scd2_mercadologico.py
+              description: "Valida invariantes do mercadologico SCD2 real"
+
+        scd2_mercadologico_incremental:
+          name: "[${bundle.target}] Varejinho — Mercadologico SCD2 Incremental"
+          tags:
+            purpose: ops
+            block: scd2
+          max_concurrent_runs: 1
+          parameters:
+            - name: catalog
+              default: ${var.catalog}
+            - name: bundle_files_path
+              default: ${workspace.file_path}
+            - name: control_root
+              default: ${var.control_root}
+          tasks:
+            - task_key: apply_incremental_mercadologico_scd2
+              notebook_task:
+                notebook_path: ${workspace.file_path}/pipeline/silver/incremental_scd2.py
+                base_parameters:
+                  entity: mercadologico
+              description: "Processa apenas snapshots novos do mercadologico com first-observed boundaries"
+
+            - task_key: validate_incremental_mercadologico_scd2
+              depends_on:
+                - task_key: apply_incremental_mercadologico_scd2
+              notebook_task:
+                notebook_path: ${workspace.file_path}/pipeline/silver/validate_scd2_mercadologico.py
+              description: "Valida os 19 invariantes antes de avançar watermark"
+
+            - task_key: commit_mercadologico_watermark
+              depends_on:
+                - task_key: validate_incremental_mercadologico_scd2
+              notebook_task:
+                notebook_path: ${workspace.file_path}/pipeline/silver/commit_scd2_watermark.py
+                base_parameters:
+                  entity: mercadologico
+              description: "Promove candidate somente após Quality Gate"
+
+        scd2_product_build:
+          name: "[${bundle.target}] Varejinho — Gate B3/B4 Product SCD2"
+          tags:
+            purpose: ops
+            block: scd2
+          max_concurrent_runs: 1
+          parameters:
+            - name: catalog
+              default: ${var.catalog}
+          tasks:
+            - task_key: rebuild_product_history
+              notebook_task:
+                notebook_path: ${workspace.file_path}/ops/backfill/build_scd2_product.py
+              description: "Reconstrói produto SCD2 a partir dos snapshots Bronze usando a política Type 1/Type 2 aprovada"
+
+            - task_key: validate_product_history
+              depends_on:
+                - task_key: rebuild_product_history
+              notebook_task:
+                notebook_path: ${workspace.file_path}/pipeline/silver/validate_scd2_product.py
+              description: "Valida cardinalidade, corrente única, intervalos, hash, Type 1 e estado current"
+
+        scd2_product_incremental:
+          name: "[${bundle.target}] Varejinho — Product SCD2 Incremental (Generic Engine)"
+          tags:
+            purpose: ops
+            block: scd2
+          max_concurrent_runs: 1
+          parameters:
+            - name: catalog
+              default: ${var.catalog}
+            - name: bundle_files_path
+              default: ${workspace.file_path}
+            - name: control_root
+              default: ${var.control_root}
+          tasks:
+            - task_key: apply_incremental_product_scd2
+              notebook_task:
+                notebook_path: ${workspace.file_path}/pipeline/silver/incremental_scd2.py
+                base_parameters:
+                  entity: produto
+              description: "Processa produto com o engine SCD2 compartilhado, preservando a política temporal aprovada"
+
+            - task_key: validate_incremental_product_scd2
+              depends_on:
+                - task_key: apply_incremental_product_scd2
+              notebook_task:
+                notebook_path: ${workspace.file_path}/pipeline/silver/validate_scd2_product.py
+              description: "Revalida os 21 invariantes antes de promover o watermark"
+
+            - task_key: commit_product_watermark
+              depends_on:
+                - task_key: validate_incremental_product_scd2
+              notebook_task:
+                notebook_path: ${workspace.file_path}/pipeline/silver/commit_scd2_watermark.py
+                base_parameters:
+                  entity: produto
+              description: "Promove candidate_snapshot somente após o Quality Gate"
+
+        facts_watermark_seed:
+          name: "[${bundle.target}] Varejinho — Gate D3 Facts Watermark Seed"
+          tags:
+            purpose: ops
+            block: facts
+          max_concurrent_runs: 1
+          parameters:
+            - name: catalog
+              default: ${var.catalog}
+          tasks:
+            - task_key: seed_fact_watermarks
+              notebook_task:
+                notebook_path: ${workspace.file_path}/ops/seed/seed_fact_watermark.py
+              description: "Semeia 13 watermarks a partir do maior ingestion_date já comprovadamente materializado na Silver"
+
+        facts_incremental_real:
+          name: "[${bundle.target}] Varejinho — Gate D5 Real Facts Incremental Catch-up"
+          tags:
+            purpose: ops
+            block: facts
+          max_concurrent_runs: 1
+          parameters:
+            - name: catalog
+              default: ${var.catalog}
+            - name: bundle_files_path
+              default: ${workspace.file_path}
+            - name: control_root
+              default: ${var.control_root}
+            - name: bronze_source_catalog
+              default: ${var.bronze_source_catalog}
+          tasks:
+            - task_key: apply_notaentrada
+              notebook_task:
+                notebook_path: ${workspace.file_path}/pipeline/silver/incremental_facts.py
+                base_parameters:
+                  entity: notaentrada
+              description: "Aplica snapshots pendentes de notaentrada sem avançar watermark"
+
+            - task_key: validate_notaentrada
+              depends_on:
+                - task_key: apply_notaentrada
+              notebook_task:
+                notebook_path: ${workspace.file_path}/validation/facts/validate_incremental_facts.py
+                base_parameters:
+                  entity: notaentrada
+              description: "Prova incremental == full rebuild para notaentrada"
+
+            - task_key: commit_notaentrada
+              depends_on:
+                - task_key: validate_notaentrada
+              notebook_task:
+                notebook_path: ${workspace.file_path}/pipeline/silver/commit_fact_watermark.py
+                base_parameters:
+                  entity: notaentrada
+              description: "Promove watermark de notaentrada somente após equivalência"
+
+            - task_key: apply_notaentradaitem
+              depends_on:
+                - task_key: commit_notaentrada
+              notebook_task:
+                notebook_path: ${workspace.file_path}/pipeline/silver/incremental_facts.py
+                base_parameters:
+                  entity: notaentradaitem
+              description: "Aplica snapshots pendentes de notaentradaitem sem avançar watermark"
+
+            - task_key: validate_notaentradaitem
+              depends_on:
+                - task_key: apply_notaentradaitem
+              notebook_task:
+                notebook_path: ${workspace.file_path}/validation/facts/validate_incremental_facts.py
+                base_parameters:
+                  entity: notaentradaitem
+              description: "Prova incremental == full rebuild para notaentradaitem"
+
+            - task_key: commit_notaentradaitem
+              depends_on:
+                - task_key: validate_notaentradaitem
+              notebook_task:
+                notebook_path: ${workspace.file_path}/pipeline/silver/commit_fact_watermark.py
+                base_parameters:
+                  entity: notaentradaitem
+              description: "Promove watermark de notaentradaitem somente após equivalência"
+
+            - task_key: apply_perda
+              depends_on:
+                - task_key: commit_notaentradaitem
+              notebook_task:
+                notebook_path: ${workspace.file_path}/pipeline/silver/incremental_facts.py
+                base_parameters:
+                  entity: perda
+              description: "Aplica snapshots pendentes de perda sem avançar watermark"
+
+            - task_key: validate_perda
+              depends_on:
+                - task_key: apply_perda
+              notebook_task:
+                notebook_path: ${workspace.file_path}/validation/facts/validate_incremental_facts.py
+                base_parameters:
+                  entity: perda
+              description: "Prova incremental == full rebuild para perda"
+
+            - task_key: commit_perda
+              depends_on:
+                - task_key: validate_perda
+              notebook_task:
+                notebook_path: ${workspace.file_path}/pipeline/silver/commit_fact_watermark.py
+                base_parameters:
+                  entity: perda
+              description: "Promove watermark de perda somente após equivalência"
+
+            - task_key: apply_logestoque
+              depends_on:
+                - task_key: commit_perda
+              notebook_task:
+                notebook_path: ${workspace.file_path}/pipeline/silver/incremental_facts.py
+                base_parameters:
+                  entity: logestoque
+              description: "Aplica snapshots pendentes de logestoque sem avançar watermark"
+
+            - task_key: validate_logestoque
+              depends_on:
+                - task_key: apply_logestoque
+              notebook_task:
+                notebook_path: ${workspace.file_path}/validation/facts/validate_incremental_facts.py
+                base_parameters:
+                  entity: logestoque
+              description: "Prova incremental == full rebuild para logestoque"
+
+            - task_key: commit_logestoque
+              depends_on:
+                - task_key: validate_logestoque
+              notebook_task:
+                notebook_path: ${workspace.file_path}/pipeline/silver/commit_fact_watermark.py
+                base_parameters:
+                  entity: logestoque
+              description: "Promove watermark de logestoque somente após equivalência"
+
+            - task_key: apply_promocao
+              depends_on:
+                - task_key: commit_logestoque
+              notebook_task:
+                notebook_path: ${workspace.file_path}/pipeline/silver/incremental_facts.py
+                base_parameters:
+                  entity: promocao
+              description: "Aplica snapshots pendentes de promocao sem avançar watermark"
+
+            - task_key: validate_promocao
+              depends_on:
+                - task_key: apply_promocao
+              notebook_task:
+                notebook_path: ${workspace.file_path}/validation/facts/validate_incremental_facts.py
+                base_parameters:
+                  entity: promocao
+              description: "Prova incremental == full rebuild para promocao"
+
+            - task_key: commit_promocao
+              depends_on:
+                - task_key: validate_promocao
+              notebook_task:
+                notebook_path: ${workspace.file_path}/pipeline/silver/commit_fact_watermark.py
+                base_parameters:
+                  entity: promocao
+              description: "Promove watermark de promocao somente após equivalência"
+
+            - task_key: apply_promocaoitem
+              depends_on:
+                - task_key: commit_promocao
+              notebook_task:
+                notebook_path: ${workspace.file_path}/pipeline/silver/incremental_facts.py
+                base_parameters:
+                  entity: promocaoitem
+              description: "Aplica snapshots pendentes de promocaoitem sem avançar watermark"
+
+            - task_key: validate_promocaoitem
+              depends_on:
+                - task_key: apply_promocaoitem
+              notebook_task:
+                notebook_path: ${workspace.file_path}/validation/facts/validate_incremental_facts.py
+                base_parameters:
+                  entity: promocaoitem
+              description: "Prova incremental == full rebuild para promocaoitem"
+
+            - task_key: commit_promocaoitem
+              depends_on:
+                - task_key: validate_promocaoitem
+              notebook_task:
+                notebook_path: ${workspace.file_path}/pipeline/silver/commit_fact_watermark.py
+                base_parameters:
+                  entity: promocaoitem
+              description: "Promove watermark de promocaoitem somente após equivalência"
+
+            - task_key: apply_pedido
+              depends_on:
+                - task_key: commit_promocaoitem
+              notebook_task:
+                notebook_path: ${workspace.file_path}/pipeline/silver/incremental_facts.py
+                base_parameters:
+                  entity: pedido
+              description: "Aplica snapshots pendentes de pedido sem avançar watermark"
+
+            - task_key: validate_pedido
+              depends_on:
+                - task_key: apply_pedido
+              notebook_task:
+                notebook_path: ${workspace.file_path}/validation/facts/validate_incremental_facts.py
+                base_parameters:
+                  entity: pedido
+              description: "Prova incremental == full rebuild para pedido"
+
+            - task_key: commit_pedido
+              depends_on:
+                - task_key: validate_pedido
+              notebook_task:
+                notebook_path: ${workspace.file_path}/pipeline/silver/commit_fact_watermark.py
+                base_parameters:
+                  entity: pedido
+              description: "Promove watermark de pedido somente após equivalência"
+
+            - task_key: apply_pedidoitem
+              depends_on:
+                - task_key: commit_pedido
+              notebook_task:
+                notebook_path: ${workspace.file_path}/pipeline/silver/incremental_facts.py
+                base_parameters:
+                  entity: pedidoitem
+              description: "Aplica snapshots pendentes de pedidoitem sem avançar watermark"
+
+            - task_key: validate_pedidoitem
+              depends_on:
+                - task_key: apply_pedidoitem
+              notebook_task:
+                notebook_path: ${workspace.file_path}/validation/facts/validate_incremental_facts.py
+                base_parameters:
+                  entity: pedidoitem
+              description: "Prova incremental == full rebuild para pedidoitem"
+
+            - task_key: commit_pedidoitem
+              depends_on:
+                - task_key: validate_pedidoitem
+              notebook_task:
+                notebook_path: ${workspace.file_path}/pipeline/silver/commit_fact_watermark.py
+                base_parameters:
+                  entity: pedidoitem
+              description: "Promove watermark de pedidoitem somente após equivalência"
+
+            - task_key: apply_oferta
+              depends_on:
+                - task_key: commit_pedidoitem
+              notebook_task:
+                notebook_path: ${workspace.file_path}/pipeline/silver/incremental_facts.py
+                base_parameters:
+                  entity: oferta
+              description: "Aplica snapshots pendentes de oferta sem avançar watermark"
+
+            - task_key: validate_oferta
+              depends_on:
+                - task_key: apply_oferta
+              notebook_task:
+                notebook_path: ${workspace.file_path}/validation/facts/validate_incremental_facts.py
+                base_parameters:
+                  entity: oferta
+              description: "Prova incremental == full rebuild para oferta"
+
+            - task_key: commit_oferta
+              depends_on:
+                - task_key: validate_oferta
+              notebook_task:
+                notebook_path: ${workspace.file_path}/pipeline/silver/commit_fact_watermark.py
+                base_parameters:
+                  entity: oferta
+              description: "Promove watermark de oferta somente após equivalência"
+
+            - task_key: apply_pagarfornecedor
+              depends_on:
+                - task_key: commit_oferta
+              notebook_task:
+                notebook_path: ${workspace.file_path}/pipeline/silver/incremental_facts.py
+                base_parameters:
+                  entity: pagarfornecedor
+              description: "Aplica snapshots pendentes de pagarfornecedor sem avançar watermark"
+
+            - task_key: validate_pagarfornecedor
+              depends_on:
+                - task_key: apply_pagarfornecedor
+              notebook_task:
+                notebook_path: ${workspace.file_path}/validation/facts/validate_incremental_facts.py
+                base_parameters:
+                  entity: pagarfornecedor
+              description: "Prova incremental == full rebuild para pagarfornecedor"
+
+            - task_key: commit_pagarfornecedor
+              depends_on:
+                - task_key: validate_pagarfornecedor
+              notebook_task:
+                notebook_path: ${workspace.file_path}/pipeline/silver/commit_fact_watermark.py
+                base_parameters:
+                  entity: pagarfornecedor
+              description: "Promove watermark de pagarfornecedor somente após equivalência"
+
+            - task_key: apply_pagarfornecedorparcela
+              depends_on:
+                - task_key: commit_pagarfornecedor
+              notebook_task:
+                notebook_path: ${workspace.file_path}/pipeline/silver/incremental_facts.py
+                base_parameters:
+                  entity: pagarfornecedorparcela
+              description: "Aplica snapshots pendentes de pagarfornecedorparcela sem avançar watermark"
+
+            - task_key: validate_pagarfornecedorparcela
+              depends_on:
+                - task_key: apply_pagarfornecedorparcela
+              notebook_task:
+                notebook_path: ${workspace.file_path}/validation/facts/validate_incremental_facts.py
+                base_parameters:
+                  entity: pagarfornecedorparcela
+              description: "Prova incremental == full rebuild para pagarfornecedorparcela"
+
+            - task_key: commit_pagarfornecedorparcela
+              depends_on:
+                - task_key: validate_pagarfornecedorparcela
+              notebook_task:
+                notebook_path: ${workspace.file_path}/pipeline/silver/commit_fact_watermark.py
+                base_parameters:
+                  entity: pagarfornecedorparcela
+              description: "Promove watermark de pagarfornecedorparcela somente após equivalência"
+
+            - task_key: apply_pagaroutrasdespesas
+              depends_on:
+                - task_key: commit_pagarfornecedorparcela
+              notebook_task:
+                notebook_path: ${workspace.file_path}/pipeline/silver/incremental_facts.py
+                base_parameters:
+                  entity: pagaroutrasdespesas
+              description: "Aplica snapshots pendentes de pagaroutrasdespesas sem avançar watermark"
+
+            - task_key: validate_pagaroutrasdespesas
+              depends_on:
+                - task_key: apply_pagaroutrasdespesas
+              notebook_task:
+                notebook_path: ${workspace.file_path}/validation/facts/validate_incremental_facts.py
+                base_parameters:
+                  entity: pagaroutrasdespesas
+              description: "Prova incremental == full rebuild para pagaroutrasdespesas"
+
+            - task_key: commit_pagaroutrasdespesas
+              depends_on:
+                - task_key: validate_pagaroutrasdespesas
+              notebook_task:
+                notebook_path: ${workspace.file_path}/pipeline/silver/commit_fact_watermark.py
+                base_parameters:
+                  entity: pagaroutrasdespesas
+              description: "Promove watermark de pagaroutrasdespesas somente após equivalência"
+
+            - task_key: apply_pagaroutrasdespesasimposto
+              depends_on:
+                - task_key: commit_pagaroutrasdespesas
+              notebook_task:
+                notebook_path: ${workspace.file_path}/pipeline/silver/incremental_facts.py
+                base_parameters:
+                  entity: pagaroutrasdespesasimposto
+              description: "Aplica snapshots pendentes de pagaroutrasdespesasimposto sem avançar watermark"
+
+            - task_key: validate_pagaroutrasdespesasimposto
+              depends_on:
+                - task_key: apply_pagaroutrasdespesasimposto
+              notebook_task:
+                notebook_path: ${workspace.file_path}/validation/facts/validate_incremental_facts.py
+                base_parameters:
+                  entity: pagaroutrasdespesasimposto
+              description: "Prova incremental == full rebuild para pagaroutrasdespesasimposto"
+
+            - task_key: commit_pagaroutrasdespesasimposto
+              depends_on:
+                - task_key: validate_pagaroutrasdespesasimposto
+              notebook_task:
+                notebook_path: ${workspace.file_path}/pipeline/silver/commit_fact_watermark.py
+                base_parameters:
+                  entity: pagaroutrasdespesasimposto
+              description: "Promove watermark de pagaroutrasdespesasimposto somente após equivalência"
+
+            - task_key: verify_real_fact_catchup
+              depends_on:
+                - task_key: commit_pagaroutrasdespesasimposto
+              notebook_task:
+                notebook_path: ${workspace.file_path}/validation/facts/verify_fact_incremental_real.py
+              description: "Confirma 13/13 watermarks COMMITTED no Bronze max e zero snapshots pendentes"
+
+        facts_maturity_repair:
+          name: "[${bundle.target}] Varejinho — Gate D6B Real Fact Maturity Repair"
+          tags:
+            purpose: ops
+            block: facts
+          max_concurrent_runs: 1
+          parameters:
+            - name: catalog
+              default: ${var.catalog}
+            - name: bundle_files_path
+              default: ${workspace.file_path}
+            - name: bronze_source_catalog
+              default: ${var.bronze_source_catalog}
+          tasks:
+            - task_key: repair_notaentrada
+              notebook_task:
+                notebook_path: ${workspace.file_path}/ops/repair/repair_fact_maturity_baseline.py
+                base_parameters:
+                  entity: notaentrada
+                  repair_from: "2026-09-18"
+              description: "Repara notaentrada usando somente snapshots D18..mature_cutoff e remove dados acima do cutoff"
+
+            - task_key: validate_repair_notaentrada
+              depends_on:
+                - task_key: repair_notaentrada
+              notebook_task:
+                notebook_path: ${workspace.file_path}/ops/repair/validate_fact_maturity_repair.py
+                base_parameters:
+                  entity: notaentrada
+                  repair_from: "2026-09-18"
+              description: "Valida chaves/payload do repair de notaentrada preservando extras históricos"
+
+            - task_key: commit_repair_notaentrada
+              depends_on:
+                - task_key: validate_repair_notaentrada
+              notebook_task:
+                notebook_path: ${workspace.file_path}/ops/repair/commit_fact_maturity_repair.py
+                base_parameters:
+                  entity: notaentrada
+              description: "Corrige watermark de notaentrada para o mature_cutoff somente após validação"
+
+            - task_key: repair_notaentradaitem
+              depends_on:
+                - task_key: commit_repair_notaentrada
+              notebook_task:
+                notebook_path: ${workspace.file_path}/ops/repair/repair_fact_maturity_baseline.py
+                base_parameters:
+                  entity: notaentradaitem
+                  repair_from: "2026-09-18"
+              description: "Repara notaentradaitem usando somente snapshots D18..mature_cutoff e remove dados acima do cutoff"
+
+            - task_key: validate_repair_notaentradaitem
+              depends_on:
+                - task_key: repair_notaentradaitem
+              notebook_task:
+                notebook_path: ${workspace.file_path}/ops/repair/validate_fact_maturity_repair.py
+                base_parameters:
+                  entity: notaentradaitem
+                  repair_from: "2026-09-18"
+              description: "Valida chaves/payload do repair de notaentradaitem preservando extras históricos"
+
+            - task_key: commit_repair_notaentradaitem
+              depends_on:
+                - task_key: validate_repair_notaentradaitem
+              notebook_task:
+                notebook_path: ${workspace.file_path}/ops/repair/commit_fact_maturity_repair.py
+                base_parameters:
+                  entity: notaentradaitem
+              description: "Corrige watermark de notaentradaitem para o mature_cutoff somente após validação"
+
+            - task_key: repair_perda
+              depends_on:
+                - task_key: commit_repair_notaentradaitem
+              notebook_task:
+                notebook_path: ${workspace.file_path}/ops/repair/repair_fact_maturity_baseline.py
+                base_parameters:
+                  entity: perda
+                  repair_from: "2026-09-18"
+              description: "Repara perda usando somente snapshots D18..mature_cutoff e remove dados acima do cutoff"
+
+            - task_key: validate_repair_perda
+              depends_on:
+                - task_key: repair_perda
+              notebook_task:
+                notebook_path: ${workspace.file_path}/ops/repair/validate_fact_maturity_repair.py
+                base_parameters:
+                  entity: perda
+                  repair_from: "2026-09-18"
+              description: "Valida chaves/payload do repair de perda preservando extras históricos"
+
+            - task_key: commit_repair_perda
+              depends_on:
+                - task_key: validate_repair_perda
+              notebook_task:
+                notebook_path: ${workspace.file_path}/ops/repair/commit_fact_maturity_repair.py
+                base_parameters:
+                  entity: perda
+              description: "Corrige watermark de perda para o mature_cutoff somente após validação"
+
+            - task_key: repair_logestoque
+              depends_on:
+                - task_key: commit_repair_perda
+              notebook_task:
+                notebook_path: ${workspace.file_path}/ops/repair/repair_fact_maturity_baseline.py
+                base_parameters:
+                  entity: logestoque
+                  repair_from: "2026-09-18"
+              description: "Repara logestoque usando somente snapshots D18..mature_cutoff e remove dados acima do cutoff"
+
+            - task_key: validate_repair_logestoque
+              depends_on:
+                - task_key: repair_logestoque
+              notebook_task:
+                notebook_path: ${workspace.file_path}/ops/repair/validate_fact_maturity_repair.py
+                base_parameters:
+                  entity: logestoque
+                  repair_from: "2026-09-18"
+              description: "Valida chaves/payload do repair de logestoque preservando extras históricos"
+
+            - task_key: commit_repair_logestoque
+              depends_on:
+                - task_key: validate_repair_logestoque
+              notebook_task:
+                notebook_path: ${workspace.file_path}/ops/repair/commit_fact_maturity_repair.py
+                base_parameters:
+                  entity: logestoque
+              description: "Corrige watermark de logestoque para o mature_cutoff somente após validação"
+
+            - task_key: repair_promocao
+              depends_on:
+                - task_key: commit_repair_logestoque
+              notebook_task:
+                notebook_path: ${workspace.file_path}/ops/repair/repair_fact_maturity_baseline.py
+                base_parameters:
+                  entity: promocao
+                  repair_from: "2026-09-18"
+              description: "Repara promocao usando somente snapshots D18..mature_cutoff e remove dados acima do cutoff"
+
+            - task_key: validate_repair_promocao
+              depends_on:
+                - task_key: repair_promocao
+              notebook_task:
+                notebook_path: ${workspace.file_path}/ops/repair/validate_fact_maturity_repair.py
+                base_parameters:
+                  entity: promocao
+                  repair_from: "2026-09-18"
+              description: "Valida chaves/payload do repair de promocao preservando extras históricos"
+
+            - task_key: commit_repair_promocao
+              depends_on:
+                - task_key: validate_repair_promocao
+              notebook_task:
+                notebook_path: ${workspace.file_path}/ops/repair/commit_fact_maturity_repair.py
+                base_parameters:
+                  entity: promocao
+              description: "Corrige watermark de promocao para o mature_cutoff somente após validação"
+
+            - task_key: repair_promocaoitem
+              depends_on:
+                - task_key: commit_repair_promocao
+              notebook_task:
+                notebook_path: ${workspace.file_path}/ops/repair/repair_fact_maturity_baseline.py
+                base_parameters:
+                  entity: promocaoitem
+                  repair_from: "2026-09-18"
+              description: "Repara promocaoitem usando somente snapshots D18..mature_cutoff e remove dados acima do cutoff"
+
+            - task_key: validate_repair_promocaoitem
+              depends_on:
+                - task_key: repair_promocaoitem
+              notebook_task:
+                notebook_path: ${workspace.file_path}/ops/repair/validate_fact_maturity_repair.py
+                base_parameters:
+                  entity: promocaoitem
+                  repair_from: "2026-09-18"
+              description: "Valida chaves/payload do repair de promocaoitem preservando extras históricos"
+
+            - task_key: commit_repair_promocaoitem
+              depends_on:
+                - task_key: validate_repair_promocaoitem
+              notebook_task:
+                notebook_path: ${workspace.file_path}/ops/repair/commit_fact_maturity_repair.py
+                base_parameters:
+                  entity: promocaoitem
+              description: "Corrige watermark de promocaoitem para o mature_cutoff somente após validação"
+
+            - task_key: repair_pedido
+              depends_on:
+                - task_key: commit_repair_promocaoitem
+              notebook_task:
+                notebook_path: ${workspace.file_path}/ops/repair/repair_fact_maturity_baseline.py
+                base_parameters:
+                  entity: pedido
+                  repair_from: "2026-09-18"
+              description: "Repara pedido usando somente snapshots D18..mature_cutoff e remove dados acima do cutoff"
+
+            - task_key: validate_repair_pedido
+              depends_on:
+                - task_key: repair_pedido
+              notebook_task:
+                notebook_path: ${workspace.file_path}/ops/repair/validate_fact_maturity_repair.py
+                base_parameters:
+                  entity: pedido
+                  repair_from: "2026-09-18"
+              description: "Valida chaves/payload do repair de pedido preservando extras históricos"
+
+            - task_key: commit_repair_pedido
+              depends_on:
+                - task_key: validate_repair_pedido
+              notebook_task:
+                notebook_path: ${workspace.file_path}/ops/repair/commit_fact_maturity_repair.py
+                base_parameters:
+                  entity: pedido
+              description: "Corrige watermark de pedido para o mature_cutoff somente após validação"
+
+            - task_key: repair_pedidoitem
+              depends_on:
+                - task_key: commit_repair_pedido
+              notebook_task:
+                notebook_path: ${workspace.file_path}/ops/repair/repair_fact_maturity_baseline.py
+                base_parameters:
+                  entity: pedidoitem
+                  repair_from: "2026-09-18"
+              description: "Repara pedidoitem usando somente snapshots D18..mature_cutoff e remove dados acima do cutoff"
+
+            - task_key: validate_repair_pedidoitem
+              depends_on:
+                - task_key: repair_pedidoitem
+              notebook_task:
+                notebook_path: ${workspace.file_path}/ops/repair/validate_fact_maturity_repair.py
+                base_parameters:
+                  entity: pedidoitem
+                  repair_from: "2026-09-18"
+              description: "Valida chaves/payload do repair de pedidoitem preservando extras históricos"
+
+            - task_key: commit_repair_pedidoitem
+              depends_on:
+                - task_key: validate_repair_pedidoitem
+              notebook_task:
+                notebook_path: ${workspace.file_path}/ops/repair/commit_fact_maturity_repair.py
+                base_parameters:
+                  entity: pedidoitem
+              description: "Corrige watermark de pedidoitem para o mature_cutoff somente após validação"
+
+            - task_key: repair_oferta
+              depends_on:
+                - task_key: commit_repair_pedidoitem
+              notebook_task:
+                notebook_path: ${workspace.file_path}/ops/repair/repair_fact_maturity_baseline.py
+                base_parameters:
+                  entity: oferta
+                  repair_from: "2026-09-18"
+              description: "Repara oferta usando somente snapshots D18..mature_cutoff e remove dados acima do cutoff"
+
+            - task_key: validate_repair_oferta
+              depends_on:
+                - task_key: repair_oferta
+              notebook_task:
+                notebook_path: ${workspace.file_path}/ops/repair/validate_fact_maturity_repair.py
+                base_parameters:
+                  entity: oferta
+                  repair_from: "2026-09-18"
+              description: "Valida chaves/payload do repair de oferta preservando extras históricos"
+
+            - task_key: commit_repair_oferta
+              depends_on:
+                - task_key: validate_repair_oferta
+              notebook_task:
+                notebook_path: ${workspace.file_path}/ops/repair/commit_fact_maturity_repair.py
+                base_parameters:
+                  entity: oferta
+              description: "Corrige watermark de oferta para o mature_cutoff somente após validação"
+
+            - task_key: repair_pagarfornecedor
+              depends_on:
+                - task_key: commit_repair_oferta
+              notebook_task:
+                notebook_path: ${workspace.file_path}/ops/repair/repair_fact_maturity_baseline.py
+                base_parameters:
+                  entity: pagarfornecedor
+                  repair_from: "2026-09-18"
+              description: "Repara pagarfornecedor usando somente snapshots D18..mature_cutoff e remove dados acima do cutoff"
+
+            - task_key: validate_repair_pagarfornecedor
+              depends_on:
+                - task_key: repair_pagarfornecedor
+              notebook_task:
+                notebook_path: ${workspace.file_path}/ops/repair/validate_fact_maturity_repair.py
+                base_parameters:
+                  entity: pagarfornecedor
+                  repair_from: "2026-09-18"
+              description: "Valida chaves/payload do repair de pagarfornecedor preservando extras históricos"
+
+            - task_key: commit_repair_pagarfornecedor
+              depends_on:
+                - task_key: validate_repair_pagarfornecedor
+              notebook_task:
+                notebook_path: ${workspace.file_path}/ops/repair/commit_fact_maturity_repair.py
+                base_parameters:
+                  entity: pagarfornecedor
+              description: "Corrige watermark de pagarfornecedor para o mature_cutoff somente após validação"
+
+            - task_key: repair_pagarfornecedorparcela
+              depends_on:
+                - task_key: commit_repair_pagarfornecedor
+              notebook_task:
+                notebook_path: ${workspace.file_path}/ops/repair/repair_fact_maturity_baseline.py
+                base_parameters:
+                  entity: pagarfornecedorparcela
+                  repair_from: "2026-09-18"
+              description: "Repara pagarfornecedorparcela usando somente snapshots D18..mature_cutoff e remove dados acima do cutoff"
+
+            - task_key: validate_repair_pagarfornecedorparcela
+              depends_on:
+                - task_key: repair_pagarfornecedorparcela
+              notebook_task:
+                notebook_path: ${workspace.file_path}/ops/repair/validate_fact_maturity_repair.py
+                base_parameters:
+                  entity: pagarfornecedorparcela
+                  repair_from: "2026-09-18"
+              description: "Valida chaves/payload do repair de pagarfornecedorparcela preservando extras históricos"
+
+            - task_key: commit_repair_pagarfornecedorparcela
+              depends_on:
+                - task_key: validate_repair_pagarfornecedorparcela
+              notebook_task:
+                notebook_path: ${workspace.file_path}/ops/repair/commit_fact_maturity_repair.py
+                base_parameters:
+                  entity: pagarfornecedorparcela
+              description: "Corrige watermark de pagarfornecedorparcela para o mature_cutoff somente após validação"
+
+            - task_key: repair_pagaroutrasdespesas
+              depends_on:
+                - task_key: commit_repair_pagarfornecedorparcela
+              notebook_task:
+                notebook_path: ${workspace.file_path}/ops/repair/repair_fact_maturity_baseline.py
+                base_parameters:
+                  entity: pagaroutrasdespesas
+                  repair_from: "2026-09-18"
+              description: "Repara pagaroutrasdespesas usando somente snapshots D18..mature_cutoff e remove dados acima do cutoff"
+
+            - task_key: validate_repair_pagaroutrasdespesas
+              depends_on:
+                - task_key: repair_pagaroutrasdespesas
+              notebook_task:
+                notebook_path: ${workspace.file_path}/ops/repair/validate_fact_maturity_repair.py
+                base_parameters:
+                  entity: pagaroutrasdespesas
+                  repair_from: "2026-09-18"
+              description: "Valida chaves/payload do repair de pagaroutrasdespesas preservando extras históricos"
+
+            - task_key: commit_repair_pagaroutrasdespesas
+              depends_on:
+                - task_key: validate_repair_pagaroutrasdespesas
+              notebook_task:
+                notebook_path: ${workspace.file_path}/ops/repair/commit_fact_maturity_repair.py
+                base_parameters:
+                  entity: pagaroutrasdespesas
+              description: "Corrige watermark de pagaroutrasdespesas para o mature_cutoff somente após validação"
+
+            - task_key: repair_pagaroutrasdespesasimposto
+              depends_on:
+                - task_key: commit_repair_pagaroutrasdespesas
+              notebook_task:
+                notebook_path: ${workspace.file_path}/ops/repair/repair_fact_maturity_baseline.py
+                base_parameters:
+                  entity: pagaroutrasdespesasimposto
+                  repair_from: "2026-09-18"
+              description: "Repara pagaroutrasdespesasimposto usando somente snapshots D18..mature_cutoff e remove dados acima do cutoff"
+
+            - task_key: validate_repair_pagaroutrasdespesasimposto
+              depends_on:
+                - task_key: repair_pagaroutrasdespesasimposto
+              notebook_task:
+                notebook_path: ${workspace.file_path}/ops/repair/validate_fact_maturity_repair.py
+                base_parameters:
+                  entity: pagaroutrasdespesasimposto
+                  repair_from: "2026-09-18"
+              description: "Valida chaves/payload do repair de pagaroutrasdespesasimposto preservando extras históricos"
+
+            - task_key: commit_repair_pagaroutrasdespesasimposto
+              depends_on:
+                - task_key: validate_repair_pagaroutrasdespesasimposto
+              notebook_task:
+                notebook_path: ${workspace.file_path}/ops/repair/commit_fact_maturity_repair.py
+                base_parameters:
+                  entity: pagaroutrasdespesasimposto
+              description: "Corrige watermark de pagaroutrasdespesasimposto para o mature_cutoff somente após validação"
+
+            - task_key: verify_fact_maturity_repair
+              depends_on:
+                - task_key: commit_repair_pagaroutrasdespesasimposto
+              notebook_task:
+                notebook_path: ${workspace.file_path}/ops/repair/verify_fact_maturity_repair.py
+              description: "Confirma 13/13 COMMITTED no mature_cutoff e zero linhas acima dele"
+
+        sales_maturity_repair:
+          name: "[${bundle.target}] Varejinho — Gate D7B Venda Maturity Repair"
+          tags:
+            purpose: ops
+            block: sales
+          max_concurrent_runs: 1
+          parameters:
+            - name: catalog
+              default: ${var.catalog}
+            - name: bronze_source_catalog
+              default: ${var.bronze_source_catalog}
+            - name: bundle_files_path
+              default: ${workspace.file_path}
+          tasks:
+            - task_key: repair_sales_maturity
+              notebook_task:
+                notebook_path: ${workspace.file_path}/ops/repair/repair_sales_maturity_baseline.py
+              description: "Restaura ids sobrescritos pela partição aberta para a última versão madura"
+
+            - task_key: validate_sales_maturity_repair
+              depends_on:
+                - task_key: repair_sales_maturity
+              notebook_task:
+                notebook_path: ${workspace.file_path}/ops/repair/validate_sales_maturity_repair.py
+              description: "Exige equivalência exata entre Silver venda e full rebuild até mature_cutoff"
+
+            - task_key: commit_sales_maturity_repair
+              depends_on:
+                - task_key: validate_sales_maturity_repair
+              notebook_task:
+                notebook_path: ${workspace.file_path}/ops/repair/commit_sales_maturity_repair.py
+              description: "Semeia/promove watermark de venda somente após validação"
+
+            - task_key: verify_sales_maturity_repair
+              depends_on:
+                - task_key: commit_sales_maturity_repair
+              notebook_task:
+                notebook_path: ${workspace.file_path}/ops/repair/verify_sales_maturity_repair.py
+              description: "Confirma venda COMMITTED no mature_cutoff e zero open rows"
+
+        schema_drift_baseline_bootstrap:
+          name: "[${bundle.target}] Varejinho — Ops S3A Schema Drift Baseline Bootstrap"
+          tags:
+            purpose: ops
+            block: schema_drift
+          max_concurrent_runs: 1
+          parameters:
+            - name: catalog
+              default: ${var.catalog}
+            - name: bundle_files_path
+              default: ${workspace.file_path}
+            - name: control_root
+              default: ${var.control_root}
+          tasks:
+            - task_key: bootstrap_schema_drift_baselines
+              notebook_task:
+                notebook_path: ${workspace.file_path}/ops/seed/bootstrap_schema_drift_baselines.py
+              description: "One-time: cria baselines ausentes a partir da Silver validada; nunca sobrescreve existentes"

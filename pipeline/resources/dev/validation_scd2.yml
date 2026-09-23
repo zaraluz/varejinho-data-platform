@@ -1,0 +1,696 @@
+# pipeline/resources/dev/validation_scd2.yml — provas do SCD2 (profiling, fixtures, replay, regressão genérica, R3 reappearance).
+
+# Declarado somente em targets.dev: estes jobs NUNCA são deployados em prod.
+
+targets:
+  dev:
+    resources:
+      jobs:
+        scd2_reappearance_fixture:
+          name: "[${bundle.target}] Varejinho — Release R3 SCD2 Reappearance Fixture"
+          tags:
+            purpose: validation
+            block: scd2
+          max_concurrent_runs: 1
+          parameters:
+            - name: catalog
+              default: ${var.catalog}
+            - name: bundle_files_path
+              default: ${workspace.file_path}
+            - name: control_root
+              default: ${var.control_root}/r3_scd2_reappearance
+          tasks:
+            - task_key: prepare_reappearance_fixture
+              notebook_task:
+                notebook_path: ${workspace.file_path}/validation/scd2/prepare_scd2_reappearance_fixture.py
+              description: "Cria D1-D5 sintético com gaps, SAME_TYPE2+Type1 e CHANGED_TYPE2"
+
+            - task_key: build_reappearance_baseline
+              depends_on:
+                - task_key: prepare_reappearance_fixture
+              notebook_task:
+                notebook_path: ${workspace.file_path}/ops/backfill/build_scd2_supplier.py
+                base_parameters:
+                  bronze_table: ${var.catalog}.control._r3_supplier_reappearance_baseline_bronze
+                  silver_table: ${var.catalog}.silver._r3_supplier_reappearance_incremental
+              description: "Constrói baseline incremental somente em D1"
+
+            - task_key: build_reappearance_expected
+              depends_on:
+                - task_key: prepare_reappearance_fixture
+              notebook_task:
+                notebook_path: ${workspace.file_path}/ops/backfill/build_scd2_supplier.py
+                base_parameters:
+                  bronze_table: ${var.catalog}.control._r3_supplier_reappearance_full_bronze
+                  silver_table: ${var.catalog}.silver._r3_supplier_reappearance_expected
+              description: "Full backfill D1-D5 independente usado como referência"
+
+            - task_key: validate_reappearance_expected
+              depends_on:
+                - task_key: build_reappearance_expected
+              notebook_task:
+                notebook_path: ${workspace.file_path}/pipeline/silver/validate_scd2_supplier.py
+                base_parameters:
+                  bronze_table: ${var.catalog}.control._r3_supplier_reappearance_full_bronze
+                  silver_table: ${var.catalog}.silver._r3_supplier_reappearance_expected
+              description: "Valida invariantes do full backfill de referência"
+
+            - task_key: bootstrap_reappearance_drift
+              depends_on:
+                - task_key: build_reappearance_baseline
+              notebook_task:
+                notebook_path: ${workspace.file_path}/validation/scd2/bootstrap_scd2_reappearance_drift.py
+              description: "Cria baseline de Schema Drift apenas no control_root sandbox R3"
+
+            - task_key: apply_reappearance_incremental
+              depends_on:
+                - task_key: bootstrap_reappearance_drift
+              notebook_task:
+                notebook_path: ${workspace.file_path}/pipeline/silver/incremental_scd2.py
+                base_parameters:
+                  entity: fornecedor
+                  bronze_table: ${var.catalog}.control._r3_supplier_reappearance_full_bronze
+                  silver_table: ${var.catalog}.silver._r3_supplier_reappearance_incremental
+                  control_table: ${var.catalog}.control._r3_supplier_reappearance_watermark
+              description: "Processa D2-D5 comparando cada ID com sua última observação"
+
+            - task_key: validate_reappearance_incremental
+              depends_on:
+                - task_key: apply_reappearance_incremental
+              notebook_task:
+                notebook_path: ${workspace.file_path}/pipeline/silver/validate_scd2_supplier.py
+                base_parameters:
+                  bronze_table: ${var.catalog}.control._r3_supplier_reappearance_full_bronze
+                  silver_table: ${var.catalog}.silver._r3_supplier_reappearance_incremental
+              description: "Valida invariantes SCD2 do resultado incremental"
+
+            - task_key: commit_reappearance_watermark
+              depends_on:
+                - task_key: validate_reappearance_incremental
+              notebook_task:
+                notebook_path: ${workspace.file_path}/pipeline/silver/commit_scd2_watermark.py
+                base_parameters:
+                  entity: fornecedor
+                  bronze_table: ${var.catalog}.control._r3_supplier_reappearance_full_bronze
+                  control_table: ${var.catalog}.control._r3_supplier_reappearance_watermark
+              description: "Promove watermark sandbox somente após validação"
+
+            - task_key: verify_reappearance_equivalence
+              depends_on:
+                - task_key: commit_reappearance_watermark
+                - task_key: validate_reappearance_expected
+              notebook_task:
+                notebook_path: ${workspace.file_path}/validation/scd2/verify_scd2_reappearance_fixture.py
+              description: "Prova equivalência exata incremental vs full backfill e limpa sandbox"
+
+        scd2_reappearance_profile:
+          name: "[${bundle.target}] Varejinho — Release R3 SCD2 Reappearance Profile"
+          tags:
+            purpose: validation
+            block: scd2
+          max_concurrent_runs: 1
+          parameters:
+            - name: catalog
+              default: ${var.catalog}
+            - name: bronze_source_catalog
+              default: ${var.bronze_source_catalog}
+          tasks:
+            - task_key: profile_scd2_reappearance
+              notebook_task:
+                notebook_path: ${workspace.file_path}/validation/scd2/profile_scd2_reappearance.py
+              description: "Read-only: mede IDs que somem e reaparecem e compara estado atual vs última observação"
+
+        scd2_profile:
+          name: "[${bundle.target}] Varejinho — Gate B SCD2 Profiling"
+          tags:
+            purpose: validation
+            block: scd2
+          max_concurrent_runs: 1
+          parameters:
+            - name: catalog
+              default: ${var.catalog}
+          tasks:
+            - task_key: profile_scd2_sources
+              notebook_task:
+                notebook_path: ${workspace.file_path}/validation/scd2/profile_scd2.py
+              description: "Diagnóstico read-only dos snapshots Bronze antes de reconstruir SCD2"
+
+        scd2_change_profile:
+          name: "[${bundle.target}] Varejinho — Gate B2 Change Attribution"
+          tags:
+            purpose: validation
+            block: scd2
+          max_concurrent_runs: 1
+          parameters:
+            - name: catalog
+              default: ${var.catalog}
+          tasks:
+            - task_key: profile_product_changes
+              notebook_task:
+                notebook_path: ${workspace.file_path}/validation/scd2/profile_scd2_changes.py
+              description: "Atribui as mudanças observadas de produto aos atributos e compara dataalteracao x ingestion_date"
+
+        scd2_supplier_profile:
+          name: "[${bundle.target}] Varejinho — Gate B7A Supplier SCD2 Profiling"
+          tags:
+            purpose: validation
+            block: scd2
+          max_concurrent_runs: 1
+          parameters:
+            - name: catalog
+              default: ${var.catalog}
+          tasks:
+            - task_key: profile_supplier_semantics
+              notebook_task:
+                notebook_path: ${workspace.file_path}/validation/scd2/profile_scd2_supplier.py
+              description: "Profiling read-only do fornecedor: schema, cardinalidade, change attribution e campos temporais antes de modelar Type 1/Type 2"
+
+        scd2_supplier_changes:
+          name: "[${bundle.target}] Varejinho — Gate B7B Supplier Change Attribution"
+          tags:
+            purpose: validation
+            block: scd2
+          max_concurrent_runs: 1
+          parameters:
+            - name: catalog
+              default: ${var.catalog}
+          tasks:
+            - task_key: profile_supplier_changes
+              notebook_task:
+                notebook_path: ${workspace.file_path}/validation/scd2/profile_scd2_supplier_changes.py
+              description: "Mostra mudanças reais de fornecedor campo a campo e exemplos before/after antes de fechar Type 1/Type 2"
+
+        scd2_supplier_fixture:
+          name: "[${bundle.target}] Varejinho — Gate B7C Supplier SCD2 Fixture"
+          tags:
+            purpose: validation
+            block: scd2
+          max_concurrent_runs: 1
+          parameters:
+            - name: catalog
+              default: ${var.catalog}
+          tasks:
+            - task_key: prepare_supplier_fixture
+              notebook_task:
+                notebook_path: ${workspace.file_path}/validation/scd2/prepare_scd2_supplier_fixture.py
+              description: "Cria Bronze sintética isolada com mudanças Type 1, razão social Type 2 e CNPJ Type 2"
+
+            - task_key: build_supplier_fixture
+              depends_on:
+                - task_key: prepare_supplier_fixture
+              notebook_task:
+                notebook_path: ${workspace.file_path}/ops/backfill/build_scd2_supplier.py
+                base_parameters:
+                  bronze_table: ${var.catalog}.control._b7_supplier_fixture_bronze
+                  silver_table: ${var.catalog}.silver._b7_supplier_fixture
+              description: "Executa o mesmo builder SCD2 de fornecedor sobre a fixture"
+
+            - task_key: validate_supplier_fixture
+              depends_on:
+                - task_key: build_supplier_fixture
+              notebook_task:
+                notebook_path: ${workspace.file_path}/pipeline/silver/validate_scd2_supplier.py
+                base_parameters:
+                  bronze_table: ${var.catalog}.control._b7_supplier_fixture_bronze
+                  silver_table: ${var.catalog}.silver._b7_supplier_fixture
+              description: "Roda invariantes SCD2 sobre a fixture sintética"
+
+            - task_key: verify_supplier_fixture
+              depends_on:
+                - task_key: validate_supplier_fixture
+              notebook_task:
+                notebook_path: ${workspace.file_path}/validation/scd2/verify_scd2_supplier_fixture.py
+              description: "Prova os resultados esperados de Type 1/Type 2 e limpa o sandbox após sucesso"
+
+        scd2_supplier_incremental_fixture:
+          name: "[${bundle.target}] Varejinho — Gate B7E Supplier Incremental Fixture"
+          tags:
+            purpose: validation
+            block: scd2
+          max_concurrent_runs: 1
+          parameters:
+            - name: catalog
+              default: ${var.catalog}
+            - name: bundle_files_path
+              default: ${workspace.file_path}
+            - name: control_root
+              default: ${var.control_root}
+          tasks:
+            - task_key: prepare_supplier_incremental_fixture
+              notebook_task:
+                notebook_path: ${workspace.file_path}/validation/scd2/prepare_scd2_supplier_incremental_fixture.py
+              description: "Cria baseline até D2, Bronze completa até D4 e watermark sandbox em D2"
+
+            - task_key: build_supplier_incremental_baseline
+              depends_on:
+                - task_key: prepare_supplier_incremental_fixture
+              notebook_task:
+                notebook_path: ${workspace.file_path}/ops/backfill/build_scd2_supplier.py
+                base_parameters:
+                  bronze_table: ${var.catalog}.control._b7e_supplier_baseline_bronze
+                  silver_table: ${var.catalog}.silver._b7e_supplier_incremental
+              description: "Constrói a Silver sandbox apenas até o watermark inicial"
+
+            - task_key: apply_generic_incremental_supplier
+              depends_on:
+                - task_key: build_supplier_incremental_baseline
+              notebook_task:
+                notebook_path: ${workspace.file_path}/pipeline/silver/incremental_scd2.py
+                base_parameters:
+                  entity: fornecedor
+                  bronze_table: ${var.catalog}.control._b7e_supplier_full_bronze
+                  silver_table: ${var.catalog}.silver._b7e_supplier_incremental
+                  control_table: ${var.catalog}.control._b7e_supplier_watermark
+              description: "Processa D3/D4 com o engine SCD2 reutilizável, incluindo Type 1, Type 2, novo id e alerta de CNPJ"
+
+            - task_key: validate_generic_incremental_supplier
+              depends_on:
+                - task_key: apply_generic_incremental_supplier
+              notebook_task:
+                notebook_path: ${workspace.file_path}/pipeline/silver/validate_scd2_supplier.py
+                base_parameters:
+                  bronze_table: ${var.catalog}.control._b7e_supplier_full_bronze
+                  silver_table: ${var.catalog}.silver._b7e_supplier_incremental
+              description: "Valida invariantes contra toda a Bronze sintética antes do commit"
+
+            - task_key: commit_supplier_incremental_fixture_watermark
+              depends_on:
+                - task_key: validate_generic_incremental_supplier
+              notebook_task:
+                notebook_path: ${workspace.file_path}/pipeline/silver/commit_scd2_watermark.py
+                base_parameters:
+                  entity: fornecedor
+                  bronze_table: ${var.catalog}.control._b7e_supplier_full_bronze
+                  control_table: ${var.catalog}.control._b7e_supplier_watermark
+              description: "Promove o watermark sandbox somente após o Quality Gate"
+
+            - task_key: verify_supplier_incremental_fixture
+              depends_on:
+                - task_key: commit_supplier_incremental_fixture_watermark
+              notebook_task:
+                notebook_path: ${workspace.file_path}/validation/scd2/verify_scd2_supplier_incremental_fixture.py
+              description: "Prova versões, Type 1, novo id, boundaries e watermark; limpa sandbox após sucesso"
+
+        scd2_supplier_replay:
+          name: "[${bundle.target}] Varejinho — Gate B7G Supplier SCD2 Replay"
+          tags:
+            purpose: validation
+            block: scd2
+          max_concurrent_runs: 1
+          parameters:
+            - name: catalog
+              default: ${var.catalog}
+            - name: bundle_files_path
+              default: ${workspace.file_path}
+            - name: control_root
+              default: ${var.control_root}
+          tasks:
+            - task_key: prepare_supplier_replay
+              notebook_task:
+                notebook_path: ${workspace.file_path}/validation/scd2/prepare_scd2_replay.py
+                base_parameters:
+                  entity: fornecedor
+              description: "Cria baseline, Silver replay e watermark sandbox recuado um snapshot; não toca no estado real"
+
+            - task_key: replay_supplier_incremental
+              depends_on:
+                - task_key: prepare_supplier_replay
+              notebook_task:
+                notebook_path: ${workspace.file_path}/pipeline/silver/incremental_scd2.py
+                base_parameters:
+                  entity: fornecedor
+                  silver_table: ${var.catalog}.silver._replay_fornecedor
+                  control_table: ${var.catalog}.control._replay_fornecedor_watermark
+              description: "Reprocessa o último snapshot com o mesmo engine incremental genérico"
+
+            - task_key: validate_supplier_replay
+              depends_on:
+                - task_key: replay_supplier_incremental
+              notebook_task:
+                notebook_path: ${workspace.file_path}/pipeline/silver/validate_scd2_supplier.py
+                base_parameters:
+                  silver_table: ${var.catalog}.silver._replay_fornecedor
+              description: "Roda invariantes SCD2 sobre a cópia após replay"
+
+            - task_key: commit_supplier_replay_watermark
+              depends_on:
+                - task_key: validate_supplier_replay
+              notebook_task:
+                notebook_path: ${workspace.file_path}/pipeline/silver/commit_scd2_watermark.py
+                base_parameters:
+                  entity: fornecedor
+                  control_table: ${var.catalog}.control._replay_fornecedor_watermark
+              description: "Promove somente o watermark sandbox após Quality Gate"
+
+            - task_key: verify_supplier_replay
+              depends_on:
+                - task_key: commit_supplier_replay_watermark
+              notebook_task:
+                notebook_path: ${workspace.file_path}/validation/scd2/verify_scd2_replay.py
+                base_parameters:
+                  entity: fornecedor
+              description: "Compara baseline/replay com exceptAll e confirma Silver/watermark reais intactos"
+
+        scd2_product_generic_regression:
+          name: "[${bundle.target}] Varejinho — Gate B7H Product Generic Engine Regression"
+          tags:
+            purpose: validation
+            block: scd2
+          max_concurrent_runs: 1
+          parameters:
+            - name: bundle_files_path
+              default: ${workspace.file_path}
+            - name: control_root
+              default: ${var.control_root}
+          tasks:
+            - task_key: prepare_product_generic_regression
+              notebook_task:
+                notebook_path: ${workspace.file_path}/validation/scd2/prepare_scd2_product_generic_regression.py
+                base_parameters:
+                  catalog: ${var.catalog}
+              description: "Escolhe snapshot histórico com mudanças reais, cria Bronze baseline/test e preserva baseline do estado real"
+
+            - task_key: build_product_baseline
+              depends_on:
+                - task_key: prepare_product_generic_regression
+              notebook_task:
+                notebook_path: ${workspace.file_path}/ops/backfill/build_scd2_product.py
+                base_parameters:
+                  catalog: ${var.catalog}
+                  bronze_table: ${var.catalog}.control._b7h_product_baseline_bronze
+                  silver_table: ${var.catalog}.silver._b7h_product_generic
+              description: "Reconstrói a Silver sandbox somente até o snapshot anterior"
+
+            - task_key: build_product_expected
+              depends_on:
+                - task_key: prepare_product_generic_regression
+              notebook_task:
+                notebook_path: ${workspace.file_path}/ops/backfill/build_scd2_product.py
+                base_parameters:
+                  catalog: ${var.catalog}
+                  bronze_table: ${var.catalog}.control._b7h_product_test_bronze
+                  silver_table: ${var.catalog}.silver._b7h_product_expected
+              description: "Constrói por full backfill o estado esperado até o snapshot exercitado"
+
+            - task_key: apply_generic_product_incremental
+              depends_on:
+                - task_key: build_product_baseline
+              notebook_task:
+                notebook_path: ${workspace.file_path}/pipeline/silver/incremental_scd2.py
+                base_parameters:
+                  catalog: ${var.catalog}
+                  entity: produto
+                  bronze_table: ${var.catalog}.control._b7h_product_test_bronze
+                  silver_table: ${var.catalog}.silver._b7h_product_generic
+                  control_table: ${var.catalog}.control._b7h_product_watermark
+              description: "Processa o snapshot escolhido com o engine SCD2 genérico"
+
+            - task_key: validate_generic_product
+              depends_on:
+                - task_key: apply_generic_product_incremental
+              notebook_task:
+                notebook_path: ${workspace.file_path}/pipeline/silver/validate_scd2_product.py
+                base_parameters:
+                  catalog: ${var.catalog}
+                  bronze_table: ${var.catalog}.control._b7h_product_test_bronze
+                  silver_table: ${var.catalog}.silver._b7h_product_generic
+              description: "Roda os 21 invariantes sobre o resultado do engine genérico"
+
+            - task_key: validate_expected_product
+              depends_on:
+                - task_key: build_product_expected
+              notebook_task:
+                notebook_path: ${workspace.file_path}/pipeline/silver/validate_scd2_product.py
+                base_parameters:
+                  catalog: ${var.catalog}
+                  bronze_table: ${var.catalog}.control._b7h_product_test_bronze
+                  silver_table: ${var.catalog}.silver._b7h_product_expected
+              description: "Valida independentemente o full backfill usado como referência"
+
+            - task_key: commit_generic_product_watermark
+              depends_on:
+                - task_key: validate_generic_product
+              notebook_task:
+                notebook_path: ${workspace.file_path}/pipeline/silver/commit_scd2_watermark.py
+                base_parameters:
+                  catalog: ${var.catalog}
+                  entity: produto
+                  bronze_table: ${var.catalog}.control._b7h_product_test_bronze
+                  control_table: ${var.catalog}.control._b7h_product_watermark
+              description: "Promove apenas o watermark sandbox após o Quality Gate genérico"
+
+            - task_key: verify_product_generic_regression
+              depends_on:
+                - task_key: commit_generic_product_watermark
+                - task_key: validate_expected_product
+              notebook_task:
+                notebook_path: ${workspace.file_path}/validation/scd2/verify_scd2_product_generic_regression.py
+                base_parameters:
+                  catalog: ${var.catalog}
+              description: "Compara engine genérico vs full backfill por exceptAll e confirma estado real intocado"
+
+        scd2_mercadologico_profile:
+          name: "[${bundle.target}] Varejinho — Gate B8A Mercadologico SCD2 Profiling"
+          tags:
+            purpose: validation
+            block: scd2
+          max_concurrent_runs: 1
+          parameters:
+            - name: catalog
+              default: ${var.catalog}
+          tasks:
+            - task_key: profile_mercadologico_semantics
+              notebook_task:
+                notebook_path: ${workspace.file_path}/validation/scd2/profile_scd2_mercadologico.py
+              description: "Profiling read-only do mercadologico: schema, mudanças por atributo, candidatos temporais e estrutura hierárquica antes do modeling"
+
+        scd2_mercadologico_fixture:
+          name: "[${bundle.target}] Varejinho — Gate B8B Mercadologico SCD2 Fixture"
+          tags:
+            purpose: validation
+            block: scd2
+          max_concurrent_runs: 1
+          parameters:
+            - name: catalog
+              default: ${var.catalog}
+          tasks:
+            - task_key: prepare_mercadologico_fixture
+              notebook_task:
+                notebook_path: ${workspace.file_path}/validation/scd2/prepare_scd2_mercadologico_fixture.py
+              description: "Cria fixture com renome de descrição, mudança de pai, mudança de nível/caminho e novo nó"
+
+            - task_key: build_mercadologico_fixture
+              depends_on:
+                - task_key: prepare_mercadologico_fixture
+              notebook_task:
+                notebook_path: ${workspace.file_path}/ops/backfill/build_scd2_mercadologico.py
+                base_parameters:
+                  bronze_table: ${var.catalog}.control._b8_mercadologico_fixture_bronze
+                  silver_table: ${var.catalog}.silver._b8_mercadologico_fixture
+              description: "Executa o builder mercadológico no sandbox"
+
+            - task_key: validate_mercadologico_fixture
+              depends_on:
+                - task_key: build_mercadologico_fixture
+              notebook_task:
+                notebook_path: ${workspace.file_path}/pipeline/silver/validate_scd2_mercadologico.py
+                base_parameters:
+                  bronze_table: ${var.catalog}.control._b8_mercadologico_fixture_bronze
+                  silver_table: ${var.catalog}.silver._b8_mercadologico_fixture
+              description: "Valida invariantes SCD2 sobre a fixture"
+
+            - task_key: verify_mercadologico_fixture
+              depends_on:
+                - task_key: validate_mercadologico_fixture
+              notebook_task:
+                notebook_path: ${workspace.file_path}/validation/scd2/verify_scd2_mercadologico_fixture.py
+              description: "Prova Type1/Type2/boundaries esperados e limpa sandbox"
+
+        scd2_mercadologico_incremental_fixture:
+          name: "[${bundle.target}] Varejinho — Gate B8D Mercadologico Incremental Fixture"
+          tags:
+            purpose: validation
+            block: scd2
+          max_concurrent_runs: 1
+          parameters:
+            - name: catalog
+              default: ${var.catalog}
+            - name: bundle_files_path
+              default: ${workspace.file_path}
+            - name: control_root
+              default: ${var.control_root}
+          tasks:
+            - task_key: prepare_mercadologico_incremental_fixture
+              notebook_task:
+                notebook_path: ${workspace.file_path}/validation/scd2/prepare_scd2_mercadologico_incremental_fixture.py
+              description: "Cria baseline D2 + Bronze completa D4 + watermark sandbox D2"
+
+            - task_key: build_mercadologico_incremental_baseline
+              depends_on:
+                - task_key: prepare_mercadologico_incremental_fixture
+              notebook_task:
+                notebook_path: ${workspace.file_path}/ops/backfill/build_scd2_mercadologico.py
+                base_parameters:
+                  bronze_table: ${var.catalog}.control._b8d_mercadologico_baseline_bronze
+                  silver_table: ${var.catalog}.silver._b8d_mercadologico_incremental
+              description: "Constrói o estado baseline até D2"
+
+            - task_key: apply_generic_incremental_mercadologico
+              depends_on:
+                - task_key: build_mercadologico_incremental_baseline
+              notebook_task:
+                notebook_path: ${workspace.file_path}/pipeline/silver/incremental_scd2.py
+                base_parameters:
+                  entity: mercadologico
+                  bronze_table: ${var.catalog}.control._b8d_mercadologico_full_bronze
+                  silver_table: ${var.catalog}.silver._b8d_mercadologico_incremental
+                  control_table: ${var.catalog}.control._b8d_mercadologico_watermark
+              description: "Processa D3/D4 com Type1, Type2 e novo id usando o engine genérico"
+
+            - task_key: validate_incremental_mercadologico_fixture
+              depends_on:
+                - task_key: apply_generic_incremental_mercadologico
+              notebook_task:
+                notebook_path: ${workspace.file_path}/pipeline/silver/validate_scd2_mercadologico.py
+                base_parameters:
+                  bronze_table: ${var.catalog}.control._b8d_mercadologico_full_bronze
+                  silver_table: ${var.catalog}.silver._b8d_mercadologico_incremental
+              description: "Valida os 19 invariantes antes do commit de watermark"
+
+            - task_key: commit_mercadologico_incremental_fixture_watermark
+              depends_on:
+                - task_key: validate_incremental_mercadologico_fixture
+              notebook_task:
+                notebook_path: ${workspace.file_path}/pipeline/silver/commit_scd2_watermark.py
+                base_parameters:
+                  entity: mercadologico
+                  bronze_table: ${var.catalog}.control._b8d_mercadologico_full_bronze
+                  control_table: ${var.catalog}.control._b8d_mercadologico_watermark
+              description: "Promove watermark sandbox apenas após Quality Gate"
+
+            - task_key: verify_mercadologico_incremental_fixture
+              depends_on:
+                - task_key: commit_mercadologico_incremental_fixture_watermark
+              notebook_task:
+                notebook_path: ${workspace.file_path}/validation/scd2/verify_scd2_mercadologico_incremental_fixture.py
+              description: "Prova versões, first-observed, Type1 e watermark; limpa sandbox após sucesso"
+
+        scd2_mercadologico_replay:
+          name: "[${bundle.target}] Varejinho — Mercadologico SCD2 Replay"
+          tags:
+            purpose: validation
+            block: scd2
+          max_concurrent_runs: 1
+          parameters:
+            - name: catalog
+              default: ${var.catalog}
+            - name: bundle_files_path
+              default: ${workspace.file_path}
+            - name: control_root
+              default: ${var.control_root}
+          tasks:
+            - task_key: prepare_mercadologico_replay
+              notebook_task:
+                notebook_path: ${workspace.file_path}/validation/scd2/prepare_scd2_replay.py
+                base_parameters:
+                  entity: mercadologico
+              description: "Cria baseline, Silver replay e watermark sandbox recuado um snapshot"
+
+            - task_key: replay_mercadologico_incremental
+              depends_on:
+                - task_key: prepare_mercadologico_replay
+              notebook_task:
+                notebook_path: ${workspace.file_path}/pipeline/silver/incremental_scd2.py
+                base_parameters:
+                  entity: mercadologico
+                  silver_table: ${var.catalog}.silver._replay_mercadologico
+                  control_table: ${var.catalog}.control._replay_mercadologico_watermark
+              description: "Reprocessa o último snapshot com o engine genérico"
+
+            - task_key: validate_mercadologico_replay
+              depends_on:
+                - task_key: replay_mercadologico_incremental
+              notebook_task:
+                notebook_path: ${workspace.file_path}/pipeline/silver/validate_scd2_mercadologico.py
+                base_parameters:
+                  silver_table: ${var.catalog}.silver._replay_mercadologico
+              description: "Roda os 19 invariantes sobre a cópia após replay"
+
+            - task_key: commit_mercadologico_replay_watermark
+              depends_on:
+                - task_key: validate_mercadologico_replay
+              notebook_task:
+                notebook_path: ${workspace.file_path}/pipeline/silver/commit_scd2_watermark.py
+                base_parameters:
+                  entity: mercadologico
+                  control_table: ${var.catalog}.control._replay_mercadologico_watermark
+              description: "Promove somente o watermark sandbox"
+
+            - task_key: verify_mercadologico_replay
+              depends_on:
+                - task_key: commit_mercadologico_replay_watermark
+              notebook_task:
+                notebook_path: ${workspace.file_path}/validation/scd2/verify_scd2_replay.py
+                base_parameters:
+                  entity: mercadologico
+              description: "Prova igualdade exata antes/depois e estado real intocado"
+
+        scd2_product_replay:
+          name: "[${bundle.target}] Varejinho — Product SCD2 Replay (Generic Engine)"
+          tags:
+            purpose: validation
+            block: scd2
+          max_concurrent_runs: 1
+          parameters:
+            - name: catalog
+              default: ${var.catalog}
+            - name: bundle_files_path
+              default: ${workspace.file_path}
+            - name: control_root
+              default: ${var.control_root}
+          tasks:
+            - task_key: prepare_replay_sandbox
+              notebook_task:
+                notebook_path: ${workspace.file_path}/validation/scd2/prepare_scd2_replay.py
+                base_parameters:
+                  entity: produto
+              description: "Cria baseline, Silver replay e watermark sandbox recuado um snapshot; não toca no estado real"
+
+            - task_key: replay_incremental_engine
+              depends_on:
+                - task_key: prepare_replay_sandbox
+              notebook_task:
+                notebook_path: ${workspace.file_path}/pipeline/silver/incremental_scd2.py
+                base_parameters:
+                  entity: produto
+                  silver_table: ${var.catalog}.silver._replay_produto
+                  control_table: ${var.catalog}.control._replay_produto_watermark
+              description: "Reprocessa o último snapshot de produto com o engine SCD2 compartilhado"
+
+            - task_key: validate_replay_scd2
+              depends_on:
+                - task_key: replay_incremental_engine
+              notebook_task:
+                notebook_path: ${workspace.file_path}/pipeline/silver/validate_scd2_product.py
+                base_parameters:
+                  silver_table: ${var.catalog}.silver._replay_produto
+              description: "Roda os 21 invariantes sobre a cópia após replay"
+
+            - task_key: commit_replay_watermark
+              depends_on:
+                - task_key: validate_replay_scd2
+              notebook_task:
+                notebook_path: ${workspace.file_path}/pipeline/silver/commit_scd2_watermark.py
+                base_parameters:
+                  entity: produto
+                  control_table: ${var.catalog}.control._replay_produto_watermark
+              description: "Promove somente o watermark sandbox após Quality Gate"
+
+            - task_key: verify_replay_idempotency
+              depends_on:
+                - task_key: commit_replay_watermark
+              notebook_task:
+                notebook_path: ${workspace.file_path}/validation/scd2/verify_scd2_replay.py
+                base_parameters:
+                  entity: produto
+              description: "Compara baseline/replay com exceptAll e confirma Silver/watermark reais intactos"

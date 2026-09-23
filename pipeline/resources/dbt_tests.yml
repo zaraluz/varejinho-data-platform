@@ -1,0 +1,31 @@
+# pipeline/resources/dbt_tests.yml — execução manual dos testes dbt sobre a Gold existente.
+# Sem agendamento: no fluxo diário o dbt roda como última task do pipeline_diario.
+
+resources:
+  jobs:
+    dbt_tests:
+      name: "[${bundle.target}] Varejinho — dbt Tests"
+      tags:
+        purpose: production
+      email_notifications:
+        on_failure:
+          - ${var.alert_email}
+      max_concurrent_runs: 1
+      environments:
+        - environment_key: dbt_env
+          spec:
+            environment_version: "4"
+            dependencies:
+              - "dbt-databricks>=1.8.0,<2.0.0"
+      tasks:
+        - task_key: dbt_test
+          environment_key: dbt_env
+          dbt_task:
+            source: WORKSPACE
+            project_directory: ${workspace.file_path}/dbt
+            commands:
+              - dbt test
+            warehouse_id: ${var.warehouse_id}
+            catalog: ${var.catalog}
+            schema: gold
+          description: "dbt test manual sobre a Gold atual (mesmo projeto deployado pelo bundle)"

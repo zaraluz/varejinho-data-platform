@@ -1,7 +1,7 @@
 -- pipeline/gold/fato_outras_despesas.sql
 -- Grão: 1 linha por despesa operacional
 -- SK: MD5(id || id_loja)
--- Join com dim_fornecedor versão atual (quando houver fornecedor)
+-- Join temporal com dim_fornecedor pela data de emissão (quando houver fornecedor)
 -- Partição: ano/mes da emissão
 
 CREATE OR REPLACE TABLE varejinho.gold.fato_outras_despesas
@@ -38,7 +38,8 @@ SELECT
 
 FROM varejinho.silver.pagaroutrasdespesas od
 
--- Join com dim_fornecedor — versão atual (nullable — nem toda despesa tem fornecedor)
+-- Join temporal com dim_fornecedor pela emissão; permanece LEFT porque fornecedor é opcional
 LEFT JOIN varejinho.gold.dim_fornecedor f
     ON  od.id_fornecedor = f.id_fornecedor
-    AND f.is_current     = true
+    AND od.dataemissao  >= f.valid_from
+    AND (f.valid_to IS NULL OR od.dataemissao < f.valid_to)

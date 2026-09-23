@@ -1,7 +1,30 @@
 # Databricks notebook source
-# pipeline/gold/optimize_vacuum.py
+# pipeline/gold/optimize.py
 # OPTIMIZE + ZORDER + VACUUM em todas as tabelas da Gold
-# Rodar após qualquer recriação de tabela ou semanalmente via DAB
+
+
+def job_param(nome: str, default: str) -> str:
+    try:
+        return dbutils.widgets.get(nome)
+    except Exception:
+        return default
+
+
+def required_param(nome: str) -> str:
+    """Parâmetro obrigatório do job: falha cedo em vez de cair num default de ambiente."""
+    try:
+        value = dbutils.widgets.get(nome)
+    except Exception:
+        value = ""
+    if not value:
+        raise ValueError(
+            f"Parâmetro obrigatório ausente: '{nome}'. Execute via job do bundle, "
+            "que injeta catalog/bundle_files_path/control_root/bronze_source_catalog por target."
+        )
+    return value
+
+
+CATALOG = required_param("catalog")
 
 tabelas_fato = [
     ("fato_vendas",            "sk_produto, id_loja"),
@@ -19,22 +42,20 @@ tabelas_dim = [
     "dim_produto", "dim_fornecedor", "dim_mercadologico", "dim_loja", "dim_tempo"
 ]
 
-# OPTIMIZE + ZORDER nos fatos
 for tabela, zorder in tabelas_fato:
-    spark.sql(f"OPTIMIZE varejinho.gold.{tabela} ZORDER BY ({zorder})")
-    print(f"✅ OPTIMIZE {tabela}")
+    spark.sql(f"OPTIMIZE {CATALOG}.gold.{tabela} ZORDER BY ({zorder})")
+    print(f"✅ OPTIMIZE {CATALOG}.gold.{tabela}")
 
-# OPTIMIZE nas dimensões (sem ZORDER — volume pequeno)
 for tabela in tabelas_dim:
-    spark.sql(f"OPTIMIZE varejinho.gold.{tabela}")
-    print(f"✅ OPTIMIZE {tabela}")
+    spark.sql(f"OPTIMIZE {CATALOG}.gold.{tabela}")
+    print(f"✅ OPTIMIZE {CATALOG}.gold.{tabela}")
 
-# VACUUM em todas — retém 30 dias para Time Travel
+# Mantém 30 dias de retenção para Time Travel.
 todas = [t for t, _ in tabelas_fato] + tabelas_dim
 for tabela in todas:
     spark.sql(f"""
-        ALTER TABLE varejinho.gold.{tabela}
+        ALTER TABLE {CATALOG}.gold.{tabela}
         SET TBLPROPERTIES ('delta.deletedFileRetentionDuration' = 'interval 30 days')
     """)
-    spark.sql(f"VACUUM varejinho.gold.{tabela} RETAIN 720 HOURS")
-    print(f"✅ VACUUM {tabela}")
+    spark.sql(f"VACUUM {CATALOG}.gold.{tabela} RETAIN 720 HOURS")
+    print(f"✅ VACUUM {CATALOG}.gold.{tabela}")

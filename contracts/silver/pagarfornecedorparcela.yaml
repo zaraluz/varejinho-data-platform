@@ -1,16 +1,37 @@
-table: varejinho.silver.pagarfornecedorparcela
+table: pagarfornecedorparcela
 owner: zara.louise
 description: Parcelas de pagamento a fornecedores
 sla_freshness_hours: 24
-grain: [id]
+grain:
+  - id
 
 columns:
-  - {name: id,                    type: bigint,       nullable: false, unique: true}
-  - {name: id_pagarfornecedor,    type: bigint,       nullable: false}
-  - {name: numeroparcela,         type: int,          nullable: false}
-  - {name: datavencimento,        type: timestamp,    nullable: false}
-  - {name: valor,                 type: decimal(14,2),nullable: false, min: 0}
+  - name: id
+    type: string
+    nullable: false
+    unique: true
+  - name: id_pagarfornecedor
+    type: string
+    nullable: false
+  - name: numeroparcela
+    type: string
+    nullable: false
+  - name: datavencimento
+    type: timestamp
+    nullable: false
+  - name: valor
+    type: "decimal(14,3)"
+    nullable: false
+    min: 0
 
 quality_rules:
-  - {rule: no_duplicates,  key: [id],        severity: error}
-  - {rule: not_null,       columns: [id, id_pagarfornecedor, datavencimento, valor], severity: error}
+  - rule: no_duplicates
+    key: [id]
+    severity: error
+  - rule: not_null
+    columns: [id, id_pagarfornecedor, datavencimento, valor]
+    severity: error
+  - rule: referential_integrity
+    column: id_pagarfornecedor
+    references: pagarfornecedor.id
+    severity: warning

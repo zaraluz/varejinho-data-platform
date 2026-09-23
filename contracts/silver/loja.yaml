@@ -1,0 +1,19 @@
+table: loja
+owner: zara.louise
+description: Cadastro corrente de lojas e CD
+grain:
+  - id
+
+columns:
+  - name: id
+    type: string
+    nullable: false
+    unique: true
+
+quality_rules:
+  - rule: no_duplicates
+    key: [id]
+    severity: error
+  - rule: not_null
+    columns: [id]
+    severity: error

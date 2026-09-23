@@ -1,0 +1,45 @@
+# pipeline/resources/dev/validation_schema_drift.yml — provas de Schema Drift (auditoria S1/final, fixture S2).
+
+# Declarado somente em targets.dev: estes jobs NUNCA são deployados em prod.
+
+targets:
+  dev:
+    resources:
+      jobs:
+        schema_drift_profile:
+          name: "[${bundle.target}] Varejinho — Gate S1 Schema Drift Registry Audit"
+          tags:
+            purpose: validation
+            block: schema_drift
+          max_concurrent_runs: 1
+          parameters:
+            - name: catalog
+              default: ${var.catalog}
+            - name: bundle_files_path
+              default: ${workspace.file_path}
+            - name: control_root
+              default: ${var.control_root}
+          tasks:
+            - task_key: schema_drift_profile
+              notebook_task:
+                notebook_path: ${workspace.file_path}/validation/schema_drift/profile_schema_drift.py
+              description: "Auditoria read-only do registry: baselines vs Silver, ordem física, eventos pendentes"
+
+        schema_drift_fixture:
+          name: "[${bundle.target}] Varejinho — Gate S2 Schema Drift Engine Fixture"
+          tags:
+            purpose: validation
+            block: schema_drift
+          max_concurrent_runs: 1
+          parameters:
+            - name: catalog
+              default: ${var.catalog}
+            - name: bundle_files_path
+              default: ${workspace.file_path}
+            - name: control_root
+              default: ${var.control_root}
+          tasks:
+            - task_key: schema_drift_fixture
+              notebook_task:
+                notebook_path: ${workspace.file_path}/validation/schema_drift/fixture_schema_drift.py
+              description: "NO_DRIFT/ADDITIVE/REMOVED/TYPE_CHANGE/PROMOTION/REPLAY em sandbox próprio sob control_root"

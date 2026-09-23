@@ -1,7 +1,7 @@
 -- pipeline/gold/fato_contas_pagar.sql
 -- Grão: 1 linha por parcela de pagamento a fornecedor
 -- SK: MD5(id_parcela || id_loja)
--- Join com dim_fornecedor versão atual
+-- Join temporal com dim_fornecedor pela data de emissão do documento
 -- Partição: ano/mes do vencimento da parcela
 -- Base para análise de DRE e fluxo de caixa
 -- datapagamento nullable — parcelas não pagas retornam sk_tempo_pagamento NULL (2.362 casos)
@@ -36,4 +36,5 @@ JOIN varejinho.silver.pagarfornecedor pf
     ON pp.id_pagarfornecedor = pf.id
 LEFT JOIN varejinho.gold.dim_fornecedor f
     ON  pf.id_fornecedor = f.id_fornecedor
-    AND f.is_current     = true
+    AND pf.dataemissao  >= f.valid_from
+    AND (f.valid_to IS NULL OR pf.dataemissao < f.valid_to)

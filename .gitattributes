@@ -1,0 +1,13 @@
+# Normaliza fim de linha: o repositório guarda LF, e o checkout usa LF em qualquer
+# sistema (Windows, Linux do CI, workspace do Databricks). Evita diffs "fantasma"
+# quando o mesmo repo é editado em Windows e Linux.
+* text=auto eol=lf
+
+# Arquivos binários: nunca converter fim de linha nem tentar mostrar diff de texto.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.pdf binary
+*.parquet binary
+*.xlsx binary

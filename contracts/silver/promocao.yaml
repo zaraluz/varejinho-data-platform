@@ -1,18 +1,39 @@
-table: varejinho.silver.promocao
+table: promocao
 owner: zara.louise
 description: Promocoes ativas e futuras - full load diario, inclui datas futuras
 sla_freshness_hours: 24
-grain: [id]
+grain:
+  - id
 
 columns:
-  - {name: id,           type: bigint,        nullable: false, unique: true}
-  - {name: id_loja,      type: int,           nullable: false}
-  - {name: descricao,    type: string,        nullable: false}
-  - {name: datainicio,   type: timestamp,     nullable: false}
-  - {name: datatermino,  type: timestamp,     nullable: false}
-  - {name: valor,        type: decimal(14,2), nullable: true}
+  - name: id
+    type: string
+    nullable: false
+    unique: true
+  - name: id_loja
+    type: string
+    nullable: false
+  - name: descricao
+    type: string
+    nullable: false
+  - name: datainicio
+    type: timestamp
+    nullable: false
+  - name: datatermino
+    type: string
+    nullable: false
+  - name: valor
+    type: "decimal(14,3)"
+    nullable: true
 
 quality_rules:
-  - {rule: no_duplicates, key: [id],                               severity: error}
-  - {rule: not_null,      columns: [id, id_loja, datainicio, datatermino], severity: error}
-  - {rule: referential_integrity, column: id_loja, references: varejinho.silver.loja.id, severity: warning}
+  - rule: no_duplicates
+    key: [id]
+    severity: error
+  - rule: not_null
+    columns: [id, id_loja, datainicio, datatermino]
+    severity: error
+  - rule: referential_integrity
+    column: id_loja
+    references: loja.id
+    severity: warning

@@ -1,18 +1,41 @@
-table: varejinho.silver.pagarfornecedor
+table: pagarfornecedor
 owner: zara.louise
 description: Contas a pagar de fornecedores — cabeçalho
 sla_freshness_hours: 24
-grain: [id]
+grain:
+  - id
 
 columns:
-  - {name: id,             type: bigint,       nullable: false, unique: true}
-  - {name: id_loja,        type: int,          nullable: false}
-  - {name: id_fornecedor,  type: int,          nullable: false}
-  - {name: dataemissao,    type: timestamp,    nullable: false}
-  - {name: valor,          type: decimal(14,2),nullable: false, min: 0}
+  - name: id
+    type: string
+    nullable: false
+    unique: true
+  - name: id_loja
+    type: string
+    nullable: false
+  - name: id_fornecedor
+    type: string
+    nullable: false
+  - name: dataemissao
+    type: timestamp
+    nullable: false
+  - name: valor
+    type: "decimal(14,3)"
+    nullable: false
+    min: 0
 
 quality_rules:
-  - {rule: no_duplicates,          key: [id],              severity: error}
-  - {rule: not_null,               columns: [id, id_loja, id_fornecedor, dataemissao, valor], severity: error}
-  - {rule: referential_integrity,  column: id_loja,        references: varejinho.silver.loja.id, severity: warning}
-  - {rule: referential_integrity,  column: id_fornecedor,  references: varejinho.silver.fornecedor.id, severity: warning}
+  - rule: no_duplicates
+    key: [id]
+    severity: error
+  - rule: not_null
+    columns: [id, id_loja, id_fornecedor, dataemissao, valor]
+    severity: error
+  - rule: referential_integrity
+    column: id_loja
+    references: loja.id
+    severity: warning
+  - rule: referential_integrity
+    column: id_fornecedor
+    references: fornecedor.id
+    severity: warning

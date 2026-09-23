@@ -1,0 +1,30 @@
+table: produtofornecedor
+owner: zara.louise
+description: Relacao corrente entre produtos e fornecedores
+grain:
+  - id_produto
+  - id_fornecedor
+
+columns:
+  - name: id_produto
+    type: string
+    nullable: false
+  - name: id_fornecedor
+    type: string
+    nullable: false
+
+quality_rules:
+  - rule: no_duplicates
+    key: [id_produto, id_fornecedor]
+    severity: error
+  - rule: not_null
+    columns: [id_produto, id_fornecedor]
+    severity: error
+  - rule: referential_integrity
+    column: id_produto
+    references: produto.id
+    severity: warning
+  - rule: referential_integrity
+    column: id_fornecedor
+    references: fornecedor.id
+    severity: warning
