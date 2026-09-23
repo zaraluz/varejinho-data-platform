@@ -127,6 +127,20 @@ check(
     f"staged={stage['staged_rows']} promoted={promote['promoted_rows']}",
 )
 
+# Simula crash boundary: manifest já foi promovido, mas o watermark ainda
+# apontaria para D1. O retry do COMMIT deve reconhecer D2 como já promovido.
+promote_retry = GUARD.promote_validated(
+    "fixture_fact",
+    SOURCE_TABLE,
+    date(2026, 9, 1),
+    date(2026, 9, 2),
+)
+check(
+    "COMMIT RETRY AFTER MANIFEST PROMOTION",
+    promote_retry["reused"] and promote_retry["promoted_rows"] == 1,
+    f"reused={promote_retry['reused']} rows={promote_retry['promoted_rows']}",
+)
+
 replay = GUARD.assert_committed_unchanged(
     "fixture_fact",
     SOURCE_TABLE,
