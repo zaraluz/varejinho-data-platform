@@ -54,6 +54,40 @@ targets:
 resources:
   jobs:
 
+    partition_manifest_fixture:
+      name: "[${bundle.target}] Varejinho — Gate R2 Partition Mutation Fixture"
+      max_concurrent_runs: 1
+      parameters:
+        - name: catalog
+          default: ${var.catalog}
+        - name: bundle_files_path
+          default: ${workspace.file_path}
+        - name: control_root
+          default: ${var.control_root}/r2_partition_manifest_fixture
+      tasks:
+        - task_key: fixture_partition_manifest
+          notebook_task:
+            notebook_path: ${workspace.file_path}/pipeline/silver/fixture_partition_manifest.py
+          description: "Prova bootstrap, replay e bloqueio de mutação pós-commit / entre validate e commit"
+
+    partition_manifest_bootstrap:
+      name: "[${bundle.target}] Varejinho — Gate R2 Partition Manifest Bootstrap"
+      max_concurrent_runs: 1
+      parameters:
+        - name: catalog
+          default: ${var.catalog}
+        - name: bronze_source_catalog
+          default: ${var.bronze_source_catalog}
+        - name: bundle_files_path
+          default: ${workspace.file_path}
+        - name: control_root
+          default: ${var.control_root}
+      tasks:
+        - task_key: bootstrap_fact_partition_manifests
+          notebook_task:
+            notebook_path: ${workspace.file_path}/pipeline/silver/bootstrap_fact_partition_manifests.py
+          description: "Bootstrap explícito dos manifests das 14 facts até o watermark committed atual"
+
     bootstrap_environment:
       name: "[${bundle.target}] Varejinho — Bootstrap Ambiente"
       max_concurrent_runs: 1
