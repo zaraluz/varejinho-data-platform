@@ -45,6 +45,24 @@ The project contains:
 
 Known temporal gaps that are valid by design are **not** converted into generic `not_null` failures. For example, some historical facts legitimately retain a null temporal surrogate key when the business event predates the first defensible dimension version.
 
+## Validation evidence
+
+Latest native Databricks dbt task in `dev`:
+
+- dbt Core: `1.12.3`
+- dbt-databricks adapter: `1.12.5`
+- Gold sources discovered: `14`
+- data tests discovered: `46`
+- result: **44 PASS / 2 WARN / 0 ERROR / 0 SKIP**
+- no dbt deprecation warnings after moving source metadata to `config.meta`
+
+The two warnings are intentional business-anomaly monitors:
+
+- offer price above normal price;
+- offer price below estimated average cost.
+
+They are warnings rather than technical pipeline failures.
+
 ## Freshness
 
 Gold currently does not persist a dedicated technical load timestamp on every relation. dbt source freshness is therefore not configured with a fabricated business-date field.
