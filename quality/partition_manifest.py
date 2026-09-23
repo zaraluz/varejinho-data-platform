@@ -243,6 +243,8 @@ class FactPartitionManifestGuard:
         entity: str,
         source_table: str,
         committed: Optional[date],
+        *,
+        allow_committed_ahead: bool = False,
     ) -> dict:
         if committed is None:
             return {
@@ -280,7 +282,7 @@ class FactPartitionManifestGuard:
             )
             .count()
         )
-        if unexpected_committed_ahead:
+        if unexpected_committed_ahead and not allow_committed_ahead:
             raise PartitionManifestViolation(
                 f"{entity}: manifest has {unexpected_committed_ahead} COMMITTED "
                 f"partition(s) ahead of watermark {committed}"
@@ -413,7 +415,15 @@ class FactPartitionManifestGuard:
         if candidate is None:
             raise PartitionManifestViolation(f"{entity}: candidate is required")
 
-        self.assert_committed_unchanged(entity, source_table, committed)
+        # A retry may see manifests already promoted while the watermark update
+        # failed immediately after. In that recovery case, compare committed
+        # history <= watermark but allow the candidate range to be ahead.
+        self.assert_committed_unchanged(
+            entity,
+            source_table,
+            committed,
+            allow_committed_ahead=True,
+        )
 
         path = self.entity_path(entity)
         if not self._is_delta(path):
