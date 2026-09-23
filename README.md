@@ -4,7 +4,7 @@ A retail data platform reconstruction built on Databricks, PySpark, Delta Lake, 
 
 This repository documents the migration of a legacy data warehouse workflow into a governed, incremental and testable lakehouse-style platform. The focus is not only on moving data through Bronze, Silver and Gold, but on proving that each layer behaves correctly under mutable daily files, historical dimensions, temporal joins, data contracts and environment isolation.
 
-> **Current status:** the core Silver incremental architecture, SCD2 dimensions, Gold temporal joins and Data Contracts are validated in `dev`. Schema Drift hardening is the next active block before dbt cleanup and the final release gate.
+> **Current status:** the core Silver incremental architecture, SCD2 dimensions, Gold temporal joins, Data Contracts and Schema Drift are validated in `dev`. **dbt hardening is the active block** before the final Release Gate.
 
 ---
 
@@ -167,6 +167,37 @@ The same central contract runtime is used by both `APPLY` and pre-commit `VALIDA
 
 ---
 
+## Schema Drift
+
+Schema Drift is enforced through one canonical control plane:
+
+- `quality/schema_drift_engine.py` owns comparison, classification, event persistence and explicit promotion;
+- `quality/schema_drift_runtime.py` is the Silver runtime adapter;
+- runtime never bootstraps a missing baseline automatically;
+- additive drift is logged but projected back to the accepted baseline until explicit promotion;
+- removed columns, type changes and mixed breaking drift persist an event and **BLOCK** the run;
+- baseline promotion is a separate, auditable operation.
+
+Coverage is complete across all 37 Silver entities:
+
+- 14 incremental facts;
+- 19 reference dimensions;
+- `curvaabc`;
+- 3 SCD2 dimensions.
+
+Reference dimensions use a full preflight before any write, avoiding partial Silver updates. SCD2 drift is evaluated on the **Silver-shaped output interface**, so upstream Bronze columns that are intentionally not materialized do not create false additive drift.
+
+Validation evidence:
+
+- isolated Schema Drift fixture: `6/6`;
+- fact regressions: D4 `9/9` and D7C `11/11`;
+- reference/snapshot preflight: `20/20` with `no_drift / ALLOW`;
+- SCD2: product, supplier and merchandising all `no_drift / ALLOW`;
+- final read-only registry audit: `37/37` baselines exact vs committed Silver, `37/37` physical column order aligned, `0` invalid baselines and `0` actionable findings;
+- final daily E2E: Silver QG `85/85`, Gold QG `51/51`.
+
+---
+
 ## Validation evidence
 
 The project is built around explicit gates rather than "it ran without an exception".
@@ -178,7 +209,8 @@ The project is built around explicit gates rather than "it ran without an except
 - All 14 incremental facts committed through the latest mature partition in that run.
 - All 20 executable contracts were structurally compatible with the materialized Silver schema.
 - All 17 standard entities passed the simplified availability gate.
-- Gold temporal joins remained consistent after the Silver/Data Contracts changes.
+- Gold temporal joins remained consistent after the Silver/Data Contracts/Schema Drift changes.
+- **Schema Drift final registry audit:** `37/37` baselines found, `37/37` exact vs Silver, `37/37` physical column order aligned, `0` invalid baselines and `0` actionable findings.
 
 Latest validated dev volumes include:
 
@@ -213,42 +245,21 @@ The repository intentionally keeps the evolution visible. The current architectu
 | D+1 maturity | Open partitions blocked using file metadata evidence |
 | Gold temporal model | Historical facts resolve the dimension version valid at the event date |
 | Data Contracts | Central engine, canonical YAMLs, fixtures, runtime integration and E2E validation |
-| Schema Drift | **Next hardening block** |
-| dbt cleanup / ownership | Planned after Schema Drift |
+| Schema Drift | Canonical engine/runtime across all `37/37` Silver entities; explicit promotion; final registry audit passed |
+| dbt cleanup / ownership | **Active hardening block** |
 | Release Gate | Final diff review, prod-safe deployment and controlled smoke test |
 
 ---
 
 ## Current roadmap
 
-### 1. Schema Drift — next
-
-The next block separates **drift detection** from **schema evolution approval**.
-
-Target behavior:
-
-```text
-DETECT
-  -> CLASSIFY
-       -> additive
-       -> removed_column
-       -> type_change
-  -> DECIDE
-       -> allow + log
-       -> block
-  -> PROMOTE BASELINE
-       only after an explicit decision
-```
-
-The key rule is that detecting a new schema must **not** automatically overwrite the accepted baseline.
-
-### 2. dbt
+### 1. dbt — active
 
 Gold is currently materialized by the PySpark/SQL pipeline, not by dbt. The dbt hardening phase will make that ownership explicit: external Gold objects should be represented honestly, while dbt focuses on testing, documentation and lineage instead of pretending to own models it does not build.
 
-### 3. Release Gate
+### 2. Release Gate
 
-Only after Contracts, Schema Drift and dbt are closed:
+Only after dbt hardening is closed:
 
 - review the full `feature/platform-hardening` -> `main` diff;
 - remove or archive temporary hardening artifacts that should not ship;
@@ -296,7 +307,7 @@ The quality gates are blocking dependencies: Gold is not rebuilt when Silver fai
 │   ├── silver/         # SCD2, incremental facts, fixtures and Silver QG
 │   ├── gold/           # dimensions, facts, temporal profiling and Gold QG
 │   └── databricks.yml  # Databricks Asset Bundle / Lakeflow Jobs definition
-└── quality/            # canonical contract engine and runtime adapter
+└── quality/            # canonical Data Contracts + Schema Drift engines/runtime adapters
 ```
 
 ---
@@ -340,6 +351,6 @@ This reconstruction is intentionally opinionated about data reliability:
 
 ## Project status
 
-This repository is an active reconstruction/hardening project. The core incremental Silver path, SCD2 modeling, Gold temporal semantics and Data Contracts have been validated in the dev environment. Schema Drift, dbt ownership cleanup and the final release process are intentionally still open and are documented as such rather than presented as finished work.
+This repository is an active reconstruction/hardening project. The core incremental Silver path, SCD2 modeling, Gold temporal semantics, Data Contracts and Schema Drift have been validated in the dev environment. dbt ownership cleanup is now the active block; the final Release Gate remains intentionally open.
 
 Built as a hands-on Data Engineering project around real retail pipeline constraints.
