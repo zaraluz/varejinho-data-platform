@@ -728,9 +728,9 @@ else:
     date_index = {d: i for i, d in enumerate(snapshot_dates)}
 
     totals = {
-        "new_ids": 0, "already_applied_new": 0, "type2_changes": 0,
-        "type1_changes": 0, "disappeared": 0, "new_inserted": 0,
-        "changed_inserted": 0, "identity_alerts": 0,
+        "new_ids": 0, "already_applied_new": 0, "reappeared": 0,
+        "type2_changes": 0, "type1_changes": 0, "disappeared": 0,
+        "new_inserted": 0, "changed_inserted": 0, "identity_alerts": 0,
     }
 
     for snapshot_date in new_snapshots:
@@ -753,6 +753,7 @@ else:
     print("\n=== SCD2 APPLY CONCLUÍDO ===")
     print(f"snapshots processados:           {len(new_snapshots)}")
     print(f"novos ids observados:            {totals['new_ids']:,}")
+    print(f"reappearances observadas:        {totals['reappeared']:,}")
     print(f"mudanças Type 2 observadas:      {totals['type2_changes']:,}")
     print(f"ids com mudança Type 1:          {totals['type1_changes']:,}")
     print(f"alertas de identidade:           {totals['identity_alerts']:,}")
