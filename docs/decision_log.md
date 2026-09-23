@@ -565,3 +565,39 @@ The previous check (`Gold >= 99% of all Silver installments`) mixed pipeline cor
 
 **Consequence**
 Gold correctness is now fail-closed on exact eligible-grain reconciliation. Source-level orphan installments remain visible through contract warnings and the Gold source-provenance check, without being misclassified as a Gold transformation defect.
+
+
+---
+
+## 2026-09-23 — D+1 post-commit mutation guard is fail-closed and part of the release path
+
+**Decision**
+Treat a committed daily partition as immutable only while its accepted physical manifest still matches the source file set. The canonical guard stores one Delta manifest per fact entity under `<control_root>/fact_partition_manifest/<entity>`, fingerprinting each `ingestion_date` from the sorted combination of `_metadata.file_path` and `_metadata.file_modification_time`.
+
+Runtime ordering is:
+1. APPLY verifies all already-COMMITTED manifests before any Silver MERGE.
+2. VALIDATE stages manifests for the newly validated candidate range.
+3. COMMIT re-observes the source; any difference blocks the watermark.
+4. Only an unchanged candidate manifest is promoted to COMMITTED.
+5. A post-commit verification immediately rechecks the promoted history.
+6. Silver Quality Gate independently re-proves committed-history immutability for all 14 incremental facts.
+
+Manifest bootstrap is explicit and never silently overwrites an existing accepted baseline.
+
+**Why**
+The mature-partition rule prevents consuming an open daily partition, but a forward-only watermark alone cannot detect a source file that changes *after* that partition has already been committed. Without an accepted manifest, a late write could remain behind the watermark and silently escape future processing.
+
+**Consequence**
+Late mutation is now a blocking, auditable failure rather than an implicit D+1 assumption.
+
+Closure evidence in dev:
+- explicit real-history bootstrap: **14/14 manifests created and verified**
+- isolated mutation fixture: **7/7**
+- includes idempotent retry when manifest promotion succeeded but watermark update has not yet completed
+- D4 integrated regression: **9/9**
+- D7C integrated regression: **11/11**
+- final daily E2E: Silver Quality Gate **99/99**
+- Gold Quality Gate **52/52**
+- all 14 fact watermarks committed through **2026-09-22** in the closing E2E
+
+The accounts-payable Gold anomaly uncovered during this E2E was separately reconciled: **840** Silver installments reference **653** header IDs absent from Bronze; eligible Silver rows reconcile exactly to Gold with **0 missing** and **0 extra** rows.
