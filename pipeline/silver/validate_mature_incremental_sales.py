@@ -22,6 +22,7 @@ BUNDLE_FILES_PATH = job_param(
     "/Workspace/Users/<USER>/varejinho-data-platform",
 )
 CONTROL_ROOT = job_param("control_root", "s3://varejinho-lake/_control/dev").rstrip("/")
+BRONZE_SOURCE_CATALOG = job_param("bronze_source_catalog", "varejinho")
 CONTROL_TABLE = job_param("control_table", f"{CATALOG}.control.fact_watermark")
 BRONZE = job_param("bronze_table", f"{CATALOG}.bronze.venda")
 SILVER = job_param("silver_table", f"{CATALOG}.silver.venda")
@@ -69,6 +70,26 @@ DRIFT = SilverSchemaDriftRuntime(
     dbutils=dbutils,
     control_root=DRIFT_CONTROL_ROOT,
     bundle_files_path=BUNDLE_FILES_PATH,
+)
+
+PARTITION_RUNTIME_PATH = f"{BUNDLE_FILES_PATH}/quality/partition_manifest_runtime.py"
+_partition_spec = importlib.util.spec_from_file_location(
+    "varejinho_partition_manifest_runtime_validate_sales",
+    PARTITION_RUNTIME_PATH,
+)
+if _partition_spec is None or _partition_spec.loader is None:
+    raise ImportError(
+        f"Não foi possível carregar partition manifest runtime: {PARTITION_RUNTIME_PATH}"
+    )
+_partition_module = importlib.util.module_from_spec(_partition_spec)
+_partition_spec.loader.exec_module(_partition_module)
+FactPartitionManifestRuntime = _partition_module.FactPartitionManifestRuntime
+MUTATION_GUARD = FactPartitionManifestRuntime(
+    spark=spark,
+    dbutils=dbutils,
+    control_root=DRIFT_CONTROL_ROOT,
+    bundle_files_path=BUNDLE_FILES_PATH,
+    bronze_source_catalog=BRONZE_SOURCE_CATALOG,
 )
 
 
@@ -211,5 +232,20 @@ if not ok:
     raise Exception(
         f"venda: lote maduro incremental divergiu para candidate={candidate}"
     )
+
+bronze_override_for_guard = (
+    BRONZE if BRONZE != f"{CATALOG}.bronze.venda" else ""
+)
+manifest_stage = MUTATION_GUARD.stage(
+    "venda",
+    committed,
+    candidate,
+    bronze_override=bronze_override_for_guard,
+)
+print(
+    f"[MUTATION_GUARD] venda: validated manifest staged "
+    f"| rows={manifest_stage['staged_rows']} "
+    f"| reused={manifest_stage['reused']}"
+)
 
 print("✅ Lote incremental de venda aprovado; watermark ainda não committed.")
