@@ -60,6 +60,8 @@ Reappearance could mean reactivation, extraction defect, source cleanup, or iden
 **Consequence**
 The pipeline prefers an explicit failure over silently manufacturing historical semantics. Reappearance policy remains a Release Gate edge case.
 
+> **Superseded on 2026-09-23** by *SCD2 reappearance follows the last observed state, not the absence*.
+
 ---
 
 ## 2026-09-18 — Fact watermark writes are serialized
@@ -104,6 +106,8 @@ Profiling proved that a folder for day `D` can exist while still being written a
 
 **Consequence**
 The platform has an explicit physical-readiness boundary rather than using visible Bronze max date as a transactional watermark.
+
+> **Extended on 2026-09-23**: the rule is coupled to the extractor schedule and the UTC session timezone; see *D+1 maturity depends on the extractor schedule; timeliness is gated separately*.
 
 ---
 
@@ -601,3 +605,186 @@ Closure evidence in dev:
 - all 14 fact watermarks committed through **2026-09-22** in the closing E2E
 
 The accounts-payable Gold anomaly uncovered during this E2E was separately reconciled: **840** Silver installments reference **653** header IDs absent from Bronze; eligible Silver rows reconcile exactly to Gold with **0 missing** and **0 extra** rows.
+
+
+---
+
+## 2026-09-23 — SCD2 reappearance follows the last observed state, not the absence
+
+**Decision**
+When an ID disappears from one or more source snapshots and later reappears:
+- absence is a non-event: no version is closed while the ID is missing;
+- reappearing with the **same** Type 2 attributes creates no new version;
+- reappearing with **changed** Type 2 attributes closes the previous version and opens a new one, exactly like any other Type 2 change;
+- Type 1 changes on reappearance update current state without versioning;
+- the watermark advances only after validation.
+
+**Why**
+The fail-fast placeholder (2026-09-17) was correct until the behavior was measured. The R3 profile found **0** real reappearances in the three dimensions, and the synthetic fixture proved the policy is consistent with an independent full backfill: incremental output equals full rebuild (`exceptAll` actual-only = 0, expected-only = 0), **11/11** checks. Treating absence as deletion would contradict the existing no-delete policy for snapshot sources.
+
+**Consequence**
+Reappearance no longer stops the pipeline. Closure evidence: R3 fixture 11/11, regressions on produto, fornecedor and mercadologico, and a daily E2E with Silver QG 99/99 and Gold QG 52/52.
+
+---
+
+## 2026-09-23 — D+1 maturity depends on the extractor schedule; timeliness is gated separately
+
+**Decision**
+1. Document that the maturity rule `to_date(file_modification_time) > ingestion_date` is evaluated in the Spark session timezone (**UTC**) and currently holds because the extractor's last daily fact load runs at **22:00 America/Fortaleza = 01:00 UTC of D+1**.
+2. Add a timeliness check to the Silver Quality Gate: each incremental fact fails if its committed watermark is more than `max_fact_staleness_days` (default **2**) behind the current business date in America/Fortaleza. Normal lag is 1 day.
+3. Do not change the maturity rule or the extractor schedule before the release. Changing them later is a single coordinated change (see Consequence).
+
+**Why**
+Verified on 2026-09-23 for `venda`, ingestion dates 2026-09-18 to 2026-09-22: the last write of every partition happened at 22:00 local / 01:00 UTC of the next day; the partition of the current day (last write 14:00 local) is correctly not mature.
+
+The coupling was undocumented and creates a silent failure mode. If the last load of day D ever lands on D in UTC, for example a single morning load writing into the run-date folder, no partition ever matures. `committed` and `mature_cutoff` then stall together, the existing alignment check (`committed == mature_cutoff`) keeps passing, and the pipeline stays green while processing nothing. Only a comparison against the calendar detects this; it covers the *timeliness* dimension, which had no check.
+
+**Alternatives considered**
+- *Only reschedule the extractor*: this is exactly the change that triggers the failure mode if the maturity rule is not changed with it.
+- *Change the maturity rule now*: it would reopen a closed gate (D4/D7C/R2 regressions) right before release for a rule that works today.
+
+**Consequence**
+A stalled maturity boundary becomes a blocking alert within two days instead of silent staleness. Post-release, when the extractor moves to one daily load (the ERP itself is D+1), change together: `ingestion_date` = business date, the extractor writes a `_SUCCESS` marker when a partition is complete, and maturity becomes "partition has `_SUCCESS`", removing the dependency on clock time and timezone.
+
+---
+
+## 2026-09-23 — Gold freshness is D-1 with one daily run at 03:00
+
+**Decision**
+Run `pipeline_diario` once a day at **03:00 America/Fortaleza** (previously 07:00, 13:00 and 21:00). Gold contains complete business days through **D-1**.
+
+**Why**
+- The ERP is itself D+1: a day is only complete in the source after it closes.
+- Facts only advance on mature partitions. Extractor schedule: facts 06:00, 14:00 and 22:00; dimensions 02:00 (under 1 hour); domains 01:00. By 03:00, day D is mature (last write 22:00) and the day's dimension and domain snapshots are loaded.
+- The 13:00 and 21:00 runs were no-ops for facts (`committed == mature_cutoff`), paying platform time for nothing.
+
+**Consequence**
+The legacy flow showed the current, incomplete day; the new Gold trades intraday freshness for complete days, a deliberate choice for a D+1 source. Sales recorded after the 22:00 load of day D are only captured by the next day's partition. If the extractor schedule changes, revisit this schedule together with the maturity rule above.
+
+---
+
+## 2026-09-23 — Runtime, one-off operations and validation evidence are separated
+
+**Decision**
+- `pipeline/`: only what the production jobs execute (16 notebooks + 14 Gold SQL files).
+- `ops/`: one-off, destructive operations (bootstrap, SCD2 backfill, seeding, repairs), dev-guarded.
+- `validation/`: fixtures, replays, profilers and diagnostics grouped by block (scd2, facts, sales, contracts, schema_drift, gold, release).
+- The bundle is split: `databricks.yml` holds identity, variables, sync and targets; `resources/*.yml` holds the production jobs; `resources/dev/*.yml` declares ops and validation jobs **only under `targets.dev`**.
+- Job resource keys are unchanged and every job carries `purpose`/`block` tags.
+
+**Why**
+72 files in one folder mixed 16 runtime notebooks with 56 proofs, and a production deploy would have created 50 jobs, including repairs and seeds. Renaming job keys would make the next deploy delete and recreate jobs, losing the run history that is the validation evidence.
+
+**Consequence**
+`bundle summary -t prod` resolves to the production jobs only. Fixtures still execute the runtime notebooks in `pipeline/`, so every gate tests the code that ships. Four notebooks whose results were cited without a job (C3, S1, S2, S3A) now have dev jobs.
+
+---
+
+## 2026-09-23 — Legacy code is deleted; rollback is a tag
+
+**Decision**
+Delete `transform_facts.py` and `transform_dimensions.py`. Create the annotated tag `legacy-v0` on the last `main` commit before the hardening release.
+
+**Why**
+No job referenced them. Keeping dead code "for rollback" confuses readers about what runs; Git already keeps it, and a tag gives the rollback point a stable name.
+
+**Consequence**
+Rollback or reference: `git show legacy-v0:pipeline/silver/transform_facts.py` or checkout the tag.
+
+---
+
+## 2026-09-23 — The deployment target is the only source of environment
+
+**Decision**
+- Runtime notebooks read `catalog`, `bundle_files_path`, `control_root` and `bronze_source_catalog` through `required_param()`: a missing value fails the task immediately.
+- Bundle variables for these values have no default; each target must declare them.
+- The `catalog must end with _dev` guard is removed from runtime notebooks and kept in `ops/` and `validation/`.
+- `alert_email` is a bundle variable with no default, supplied outside Git (`.databricks/bundle/<target>/variable-overrides.json` or `BUNDLE_VAR_alert_email`). `warehouse_id` is resolved with `lookup` by warehouse name.
+
+**Why**
+Runtime notebooks silently fell back to different environments (Silver to `varejinho_dev`, Gold to `varejinho`) or to a personal workspace path. A configuration error would run against the wrong catalog instead of failing. The dev guard, useful during hardening, also prevented the runtime from ever running in prod.
+
+**Consequence**
+The same code runs in dev and prod. A static check over the bundle found **45** tasks that relied on the removed defaults before any job ran; they now receive the same values explicitly at job level (260/260 tasks covered, no task-level parameter overridden). Regressions D4 9/9, D7C 11/11, B7E 17/17. No personal or corporate email remains in the repository.
+
+---
+
+## 2026-09-23 — dbt runs as a dependency of Gold, from the deployed project
+
+**Decision**
+`dbt test` is the last task of `pipeline_diario`, after `gold_quality_gate`, with `source: WORKSPACE` (the dbt project deployed by the bundle). `dbt_tests` remains as an unscheduled manual job.
+
+**Why**
+The separate job ran one hour after each pipeline run, on a clock: a slow or failed run would be tested mid-rebuild or against stale Gold. `source: GIT` checked out whatever the branch held at run time, so an unreviewed push could change what ran without a deploy.
+
+**Consequence**
+Tests always target the Gold built by the same run, using the reviewed, deployed version. Evidence: E2E run `400101585433018` with dbt 44 PASS / 2 WARN / 0 ERROR (46 tests). The manual job keeps its run history (D2 evidence). `pipeline_diario` also gains `timeout_seconds: 7200` and a `RUN_DURATION_SECONDS > 3600` health rule with duration-warning notification; the measured run was about 40 minutes.
+
+---
+
+## 2026-09-23 — Production jobs run as a service principal from a restricted folder
+
+**Decision**
+- Target `prod` declares `run_as` with `sp-varejinho-pipeline-prod`, which has only Workspace and Databricks SQL entitlements (no admin, no consumer).
+- Bundle files stay in the deployer's own folder; top-level permissions give the author `CAN_MANAGE` and the service principal `CAN_VIEW`.
+- Unity Catalog grants are versioned in `ops/bootstrap/grant_prod_service_principal.sql`: `USE CATALOG`; read-only Bronze; `SELECT`, `MODIFY`, `CREATE TABLE` on Silver, Gold and control; `READ FILES`/`WRITE FILES` on the control-storage external location; warehouse `Can use`.
+
+**Why**
+Running production as the author couples it to a personal account, grants admin privileges to every job and blurs the audit trail. A first attempt placed files in `/Workspace/Shared`; `bundle validate` warned that it is writable by every workspace user. With `run_as` a service principal, anyone able to edit those notebooks would effectively run code with production privileges.
+
+**Consequence**
+Deploy identity and runtime identity are decoupled. Grants and ownership transfer of the cloned tables are applied during the cutover; the smoke test must confirm the service principal can read the bundle folder.
+
+---
+
+## 2026-09-23 — "Production" is the project release on Databricks Free Edition
+
+**Decision**
+The `prod` target is the release environment of this portfolio/academic project on Databricks Free Edition. The company's operational reporting does not depend on it; the legacy Pentaho/Athena/Power BI flow remains the operational system. Use of real company data requires the company's written approval, and the README states this scope explicitly.
+
+**Why**
+The Free Edition terms allow personal, academic and non-profit use, advise uploading only data one can afford to lose, and grant Databricks a broad license over uploaded content. The company does not fund a paid workspace. Keeping `prod` in the same bundle keeps a paid workspace a one-line change (`workspace.host` in the target).
+
+**Consequence**
+Governance is explicit rather than implied. Business-facing adoption is a separate decision that requires a paid workspace and a data-processing agreement.
+
+---
+
+## 2026-09-23 — Production cutover clones the validated state; rebuild is the DR path
+
+**Decision**
+Cut over by backing up the legacy prod Silver, then `DEEP CLONE`-ing the validated Silver, control and quarantine tables from `varejinho_dev` into `varejinho` with dev paused, copying the dev control storage (watermarks, schema baselines, partition manifests) to the prod control root, deploying prod paused, running once manually and gating on Silver QG, Gold QG and dbt. Rebuilding from scratch through `ops/` (bootstrap, backfill, seed) is documented as the disaster-recovery path.
+
+**Why**
+Production then starts exactly from the state that fixtures and E2E runs proved, instead of a new rebuild that would need to be proven again. The destructive `ops/` notebooks keep their dev-only guard.
+
+**Consequence**
+Rollback is renaming the legacy backup back. The detailed runbook is written at cutover time.
+
+---
+
+## 2026-09-23 — Repository conventions before release
+
+**Decision**
+- `.gitattributes` normalizes text files to LF on every platform.
+- `pyproject.toml` pins Python (`>=3.11`) and ruff/pytest configuration; the baseline ruff run (318 findings, 196 line-length, 5 unused imports, 0 undefined names) is **not** applied before the release.
+- No LICENSE file: code is published for portfolio review, all rights reserved; no business data is included (history scanned: no data files; fixtures use synthetic identifiers).
+
+**Why**
+Line endings produced whitespace-only diffs between Windows and Linux. Reformatting 80 files would bury the behavioral release diff. A permissive license would allow reuse of a real company's data model.
+
+**Consequence**
+Formatting, lint fixes and unit tests arrive with CI after the release.
+
+---
+
+## 2026-09-23 — Pipeline duration is dominated by platform wait, not by data volume
+
+**Decision**
+Do not optimize pipeline code before the release; revisit with a second measured run.
+
+**Why**
+Per-task timing of run `939249697177826` (39.5 min, 57 tasks): typical tasks take 5–30 s, but seven tasks took about 300 s each regardless of data volume (a 1,078-row commit took 307 s), in regular windows roughly 6.5 minutes apart, sometimes two unrelated branches stalling together. About 25 minutes of the critical path is waiting on the serverless platform. The earlier hypothesis (full `_metadata` scan of Bronze for maturity) does not explain the dominant cost.
+
+**Consequence**
+Timeout and duration alerts are sized for this behavior. Post-release: compare a second run (same tasks stalling means code, different tasks means platform), then consider fewer, coarser tasks per entity.
