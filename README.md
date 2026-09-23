@@ -22,7 +22,7 @@
 9. [Running it](#running-it)
 10. [Governance and scope](#governance-and-scope)
 11. [Known limitations](#known-limitations)
-12. [Roadmap](#roadmap)
+12. [Next steps](#next-steps)
 
 ---
 
@@ -176,16 +176,6 @@ Events dated before the first known version of a dimension keep a null surrogate
 
 ## Evidence and measurements
 
-### Final validation run (dev, 2026-09-23)
-
-| Check | Result |
-|---|---|
-| `pipeline_diario` run `707938728538043` | SUCCESS · 58 tasks |
-| Silver quality gate | 113 / 113 |
-| Gold quality gate | 52 / 52 |
-| dbt | 44 pass · 2 warn (intentional) · 0 error · 46 tests |
-| Regression fixtures | D4 9/9 · D7C 11/11 · R2 7/7 · R3 11/11 |
-
 ### Data scanned per question
 
 The legacy baseline was measured on Athena over the CSV extracts. The same raw CSV is also read by Databricks as Bronze, so the Bronze and Gold columns compare **formats on the same engine**. Bytes scanned is the metric that matters here: it is what Athena bills and what drives latency as data grows.
@@ -265,23 +255,23 @@ Runtime notebooks have no environment defaults: `catalog`, `bundle_files_path`, 
 Stated plainly, because a platform is only as trustworthy as its documented edges.
 
 - **Gold freshness is D-1 by design.** The source ERP is itself D+1; complete days are preferred over an incomplete current day.
-- **D+1 maturity depends on the extractor schedule and UTC.** A stalled boundary is caught by the timeliness gate; the rule itself is replaced in the roadmap.
+- **D+1 maturity depends on the extractor schedule and UTC.** A stalled boundary is caught by the timeliness gate; replacing the rule is listed in the next steps.
 - **Z-Order does not survive the daily Gold rebuild.** Gold facts are recreated with `CREATE OR REPLACE` and Z-Order is applied weekly, so file skipping on product filters is lost the next day (the 33 MB product query above).
 - **Serverless wait dominates run time** on Free Edition (see measurements).
 - **Source orphans.** Some supplier-payment installments reference headers absent from the source extract; the Gold gate reports them as a source limitation instead of dropping them silently or fabricating a header.
 - **The Bronze quality gate covers the 10 critical fact tables**, not all 37 raw tables.
 - **No CI or unit tests yet.** Correctness is proven by in-workspace fixtures.
 
-## Roadmap
+## Next steps
 
-In order. Nothing below starts before the previous step is validated.
+Planned work. Each step is validated with the same gates and fixtures before it is considered done.
 
-1. **Production cutover.** Clone the validated dev state into the prod catalog, apply the service-principal grants, run once manually behind all gates, then activate the schedule.
-2. **Accuracy.** Reconcile Gold against independent ERP totals (counts and financial measures), then reconnect Power BI to Gold.
-3. **CI.** GitHub Actions running bundle validation for both targets, linting and PySpark unit tests over the `quality/` engines, so regressions are caught in the pull request instead of in the workspace.
-4. **Extraction v2.** One daily load (the ERP is D+1 anyway), partitions keyed by business date and a `_SUCCESS` marker written by the extractor. Maturity becomes "the partition is marked complete", removing the dependency on clock time and timezone.
-5. **Data Vault integration layer (fiscal).** A small, auditable Data Vault beside the Star Schema, not replacing it: Hubs on business keys that cross systems (product EAN, supplier tax ID, invoice access key), Links for invoice items, and Satellites per source (ERP attributes vs. electronic-invoice XML) with `record_source` and hash-diff history. The goal is integrating a second source whose keys differ from the ERP, which is exactly where Data Vault earns its complexity.
-6. **Performance, measured.** Liquid clustering declared in the Gold DDL benchmarked against the current layout, and fewer, coarser tasks per entity if the serverless overhead is confirmed as the dominant cost.
+- **Production cutover.** Clone the validated dev state into the prod catalog, apply the service-principal grants, run once manually behind all gates, then activate the schedule.
+- **Accuracy.** Reconcile Gold against independent ERP totals (counts and financial measures), then reconnect Power BI to Gold.
+- **CI.** GitHub Actions running bundle validation for both targets, linting and PySpark unit tests over the `quality/` engines, so regressions are caught in the pull request instead of in the workspace.
+- **Extraction v2.** One daily load (the ERP is D+1 anyway), partitions keyed by business date and a `_SUCCESS` marker written by the extractor. Maturity becomes "the partition is marked complete", removing the dependency on clock time and timezone.
+- **Data Vault integration layer (fiscal).** A small, auditable Data Vault beside the Star Schema, not replacing it: Hubs on business keys that cross systems (product EAN, supplier tax ID, invoice access key), Links for invoice items, and Satellites per source (ERP attributes vs. electronic-invoice XML) with `record_source` and hash-diff history. The goal is integrating a second source whose keys differ from the ERP, which is exactly where Data Vault earns its complexity.
+- **Performance, measured.** Liquid clustering declared in the Gold DDL benchmarked against the current layout, and fewer, coarser tasks per entity if the serverless overhead is confirmed as the dominant cost.
 
 ---
 
