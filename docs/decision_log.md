@@ -788,3 +788,18 @@ Per-task timing of run `939249697177826` (39.5 min, 57 tasks): typical tasks tak
 
 **Consequence**
 Timeout and duration alerts are sized for this behavior. A second measured run (`707938728538043`, 38.5 min, 58 tasks) confirmed the diagnosis: the stalled tasks were different from the first run (only `supplier_scd2_commit` repeated) and durations were quantized at about 300 s and 600 s (a 5-second commit took 606 s), which points to platform wait, not code. Post-release: consider fewer, coarser tasks per entity and measure again.
+
+---
+
+## 2026-09-23 — The release merges with a merge commit; versions stay release candidates until production proves them
+
+**Decision**
+- `feature/platform-hardening` merges into `main` with a merge commit. Squash and rebase merging are disabled in the repository settings.
+- After the merge, `main` is tagged `v1.0.0-rc.1` (annotated tag, published as a GitHub pre-release). `v1.0.0` is tagged only after the production cutover passes the Silver quality gate, the Gold quality gate and dbt, on the commit that changes the README status to production. A defect found during cutover becomes `v1.0.0-rc.2`.
+- `main` is protected by a ruleset: pull request required, no force push, no deletion. Linear history is not required, because it would forbid merge commits. Required approvals are 0 (single maintainer).
+
+**Why**
+This log, the validation history and the project tracker reference individual commit hashes from the feature branch. Squash and rebase merges create new hashes, and the original commits become unreachable once the branch is deleted. A release candidate is validated in the dev target but not yet in its destination; merge and production activation are separate approvals (see the 2026-09-22 entry on the release boundary).
+
+**Consequence**
+History is non-linear by design; `git log --first-parent main` shows one entry per merged release. The version string carries deployment status: a `-rc` suffix means validated in dev, a plain version means running in production.
