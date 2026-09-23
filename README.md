@@ -1,13 +1,13 @@
 # Varejinho Data Platform
 
+![Databricks: Unity Catalog](https://img.shields.io/badge/Databricks-Unity%20Catalog-FF3621?style=flat&logo=databricks&logoColor=white&labelColor=555555) ![Delta Lake: Silver · Gold](https://img.shields.io/badge/Delta%20Lake-Silver%20%C2%B7%20Gold-00ADD4?style=flat&logo=delta&logoColor=white&labelColor=555555) ![PySpark: Spark SQL](https://img.shields.io/badge/PySpark-Spark%20SQL-E25A1C?style=flat&logo=apachespark&logoColor=white&labelColor=555555) ![dbt: Gold tests](https://img.shields.io/badge/dbt-Gold%20tests-FF694B?style=flat&logo=dbt&logoColor=white&labelColor=555555) ![Lakeflow Jobs: Asset Bundles](https://img.shields.io/badge/Lakeflow%20Jobs-Asset%20Bundles-1B3139?style=flat&labelColor=555555) ![AWS: S3 raw landing](https://img.shields.io/badge/AWS-S3%20raw%20landing-569A31?style=flat&logo=amazons3&logoColor=white&labelColor=555555) ![Pentaho: extraction](https://img.shields.io/badge/Pentaho-extraction-005B9A?style=flat&labelColor=555555) ![PostgreSQL: source ERP](https://img.shields.io/badge/PostgreSQL-source%20ERP-4169E1?style=flat&logo=postgresql&logoColor=white&labelColor=555555) ![status: release candidate](https://img.shields.io/badge/status-release%20candidate-DFB317?style=flat&labelColor=555555)
+
 **A retail lakehouse rebuilt on Databricks with production-grade guarantees:** incremental Silver processing that never reads an unfinished day, real SCD Type 2 history, point-in-time Gold facts, executable data contracts, controlled schema evolution and a release process where every claim is backed by a reproducible test.
 
 > **TL;DR**
-> I built the first data platform of a Brazilian supermarket group (two stores and a distribution center) as its only data professional: ERP → Pentaho → CSV on S3 → Athena → Power BI. Operating it showed me where it broke: records lost at month boundaries, full reprocessing on every load, no history for master data and no quality gates. This repository is the rebuild. The hardest problem turned out to be time: knowing when a day of source data is actually complete, and making facts join the version of a product or supplier that was true *on the day the event happened*.
+> I built the first data platform of a Brazilian supermarket group as its only data professional: ERP → Pentaho → CSV on S3 → Athena → Power BI. Operating it showed me where it broke: records lost at month boundaries, full reprocessing on every load, no history for master data and no quality gates. This repository is the rebuild. The hardest problem turned out to be time: knowing when a day of source data is actually complete, and making facts join the version of a product or supplier that was true *on the day the event happened*.
 
 **Status:** release candidate. Fully validated in the `dev` target (final run `707938728538043`: Silver QG 113/113, Gold QG 52/52, dbt 44 pass / 2 intentional warnings / 0 errors). Production cutover follows the merge to `main`.
-
-**Stack:** Databricks (Unity Catalog, Delta Lake, serverless Lakeflow Jobs, Declarative Automation Bundles) · PySpark · Spark SQL · dbt · AWS S3 · Pentaho Data Integration · PostgreSQL (source ERP)
 
 ---
 
@@ -23,7 +23,8 @@
 8. [Repository map](#repository-map)
 9. [Running it](#running-it)
 10. [Governance and scope](#governance-and-scope)
-11. [Known limitations and roadmap](#known-limitations-and-roadmap)
+11. [Known limitations](#known-limitations)
+12. [Roadmap](#roadmap)
 
 ---
 
@@ -261,18 +262,28 @@ Runtime notebooks have no environment defaults: `catalog`, `bundle_files_path`, 
 
 ---
 
-## Known limitations and roadmap
+## Known limitations
 
 Stated plainly, because a platform is only as trustworthy as its documented edges.
 
 - **Gold freshness is D-1 by design.** The source ERP is itself D+1; complete days are preferred over an incomplete current day.
-- **D+1 maturity depends on the extractor schedule and UTC.** Detected by the timeliness gate; to be replaced by a `_SUCCESS` completion marker when extraction moves to one daily load.
-- **Z-Order does not survive the daily Gold rebuild.** Gold facts are recreated with `CREATE OR REPLACE` and Z-Order is applied weekly, so file skipping on product filters is lost the next day. Next step: liquid clustering declared in the table DDL, benchmarked against the current layout.
+- **D+1 maturity depends on the extractor schedule and UTC.** A stalled boundary is caught by the timeliness gate; the rule itself is replaced in the roadmap.
+- **Z-Order does not survive the daily Gold rebuild.** Gold facts are recreated with `CREATE OR REPLACE` and Z-Order is applied weekly, so file skipping on product filters is lost the next day (the 33 MB product query above).
 - **Serverless wait dominates run time** on Free Edition (see measurements).
-- **Source orphans.** Some supplier-payment installments reference headers absent from the source extract; they are reported by the Gold gate as a source limitation instead of being dropped silently or fabricated.
-- **Bronze quality gate covers the 10 critical fact tables**, not all 37 raw tables.
-- **No CI or unit tests yet.** Correctness is proven by in-workspace fixtures. `pyproject.toml` is prepared for a GitHub Actions pipeline with bundle validation, linting and PySpark unit tests over `quality/`.
-- **Accuracy against the ERP is the next proof.** Quality gates prove internal consistency; an independent ERP × Gold reconciliation comes before reconnecting Power BI.
+- **Source orphans.** Some supplier-payment installments reference headers absent from the source extract; the Gold gate reports them as a source limitation instead of dropping them silently or fabricating a header.
+- **The Bronze quality gate covers the 10 critical fact tables**, not all 37 raw tables.
+- **No CI or unit tests yet.** Correctness is proven by in-workspace fixtures.
+
+## Roadmap
+
+In order. Nothing below starts before the previous step is validated.
+
+1. **Production cutover.** Clone the validated dev state into the prod catalog, apply the service-principal grants, run once manually behind all gates, then activate the schedule.
+2. **Accuracy.** Reconcile Gold against independent ERP totals (counts and financial measures), then reconnect Power BI to Gold.
+3. **CI.** GitHub Actions running bundle validation for both targets, linting and PySpark unit tests over the `quality/` engines, so regressions are caught in the pull request instead of in the workspace.
+4. **Extraction v2.** One daily load (the ERP is D+1 anyway), partitions keyed by business date and a `_SUCCESS` marker written by the extractor. Maturity becomes "the partition is marked complete", removing the dependency on clock time and timezone.
+5. **Data Vault integration layer (fiscal).** A small, auditable Data Vault beside the Star Schema, not replacing it: Hubs on business keys that cross systems (product EAN, supplier tax ID, invoice access key), Links for invoice items, and Satellites per source (ERP attributes vs. electronic-invoice XML) with `record_source` and hash-diff history. The goal is integrating a second source whose keys differ from the ERP, which is exactly where Data Vault earns its complexity.
+6. **Performance, measured.** Liquid clustering declared in the Gold DDL benchmarked against the current layout, and fewer, coarser tasks per entity if the serverless overhead is confirmed as the dominant cost.
 
 ---
 
