@@ -12,13 +12,25 @@ def job_param(nome: str, default: str) -> str:
         return default
 
 
-CATALOG = job_param("catalog", "varejinho_dev")
+def required_param(nome: str) -> str:
+    """Parâmetro obrigatório do job: falha cedo em vez de cair num default de ambiente."""
+    try:
+        value = dbutils.widgets.get(nome)
+    except Exception:
+        value = ""
+    if not value:
+        raise ValueError(
+            f"Parâmetro obrigatório ausente: '{nome}'. Execute via job do bundle, "
+            "que injeta catalog/bundle_files_path/control_root/bronze_source_catalog por target."
+        )
+    return value
+
+
+CATALOG = required_param("catalog")
 ENTITY = job_param("entity", "fornecedor")
 BRONZE = job_param("bronze_table", f"{CATALOG}.bronze.{ENTITY}")
 CONTROL_TABLE = job_param("control_table", f"{CATALOG}.control.scd2_watermark")
 
-if not CATALOG.endswith("_dev"):
-    raise Exception(f"commit_scd2_watermark só pode executar em *_dev durante hardening. Recebido: {CATALOG}")
 
 if not spark.catalog.tableExists(CONTROL_TABLE):
     raise Exception(f"Tabela de controle não existe: {CONTROL_TABLE}")

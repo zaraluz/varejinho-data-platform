@@ -16,13 +16,24 @@ def job_param(nome: str, default: str) -> str:
         return default
 
 
-CATALOG = job_param("catalog", "varejinho_dev")
-BUNDLE_FILES_PATH = job_param(
-    "bundle_files_path",
-    "/Workspace/Users/<USER>/varejinho-data-platform",
-)
-CONTROL_ROOT = job_param("control_root", "s3://varejinho-lake/_control/dev").rstrip("/")
-BRONZE_SOURCE_CATALOG = job_param("bronze_source_catalog", "varejinho")
+def required_param(nome: str) -> str:
+    """Parâmetro obrigatório do job: falha cedo em vez de cair num default de ambiente."""
+    try:
+        value = dbutils.widgets.get(nome)
+    except Exception:
+        value = ""
+    if not value:
+        raise ValueError(
+            f"Parâmetro obrigatório ausente: '{nome}'. Execute via job do bundle, "
+            "que injeta catalog/bundle_files_path/control_root/bronze_source_catalog por target."
+        )
+    return value
+
+
+CATALOG = required_param("catalog")
+BUNDLE_FILES_PATH = required_param("bundle_files_path").rstrip("/")
+CONTROL_ROOT = required_param("control_root").rstrip("/")
+BRONZE_SOURCE_CATALOG = required_param("bronze_source_catalog")
 CONTROL_TABLE = job_param("control_table", f"{CATALOG}.control.fact_watermark")
 BRONZE = job_param("bronze_table", f"{CATALOG}.bronze.venda")
 SILVER = job_param("silver_table", f"{CATALOG}.silver.venda")
@@ -35,11 +46,6 @@ DRIFT_CONTROL_ROOT = (
     else f"{CONTROL_ROOT}/d7c"
 )
 
-if not CATALOG.endswith("_dev"):
-    raise Exception(
-        f"validate_mature_incremental_sales só pode executar em *_dev. "
-        f"Recebido: {CATALOG}"
-    )
 
 CONTRACT_RUNTIME_PATH = f"{BUNDLE_FILES_PATH}/quality/contract_runtime.py"
 _runtime_spec = importlib.util.spec_from_file_location(

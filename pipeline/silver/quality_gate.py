@@ -19,28 +19,24 @@ def job_param(nome: str, default: str) -> str:
         return default
 
 
-def derive_bundle_files_path() -> str:
-    """Resolve o root .../files tanto em execução manual quanto via bundle."""
-    raw = (
-        dbutils.notebook.entry_point.getDbutils()
-        .notebook()
-        .getContext()
-        .notebookPath()
-        .get()
-    )
-    workspace_path = raw if raw.startswith("/Workspace/") else f"/Workspace{raw}"
-    marker = "/pipeline/silver/"
-    if marker not in workspace_path:
-        raise Exception(
-            f"Silver Quality Gate fora do layout esperado do bundle: {workspace_path}"
+def required_param(nome: str) -> str:
+    """Parâmetro obrigatório do job: falha cedo em vez de cair num default de ambiente."""
+    try:
+        value = dbutils.widgets.get(nome)
+    except Exception:
+        value = ""
+    if not value:
+        raise ValueError(
+            f"Parâmetro obrigatório ausente: '{nome}'. Execute via job do bundle, "
+            "que injeta catalog/bundle_files_path/control_root/bronze_source_catalog por target."
         )
-    return workspace_path.split(marker, 1)[0]
+    return value
 
 
-CATALOG = job_param("catalog", "varejinho_dev")
-BRONZE_SOURCE_CATALOG = job_param("bronze_source_catalog", "varejinho")
-BUNDLE_FILES_PATH = job_param("bundle_files_path", derive_bundle_files_path())
-CONTROL_ROOT = job_param("control_root", "s3://varejinho-lake/_control/dev").rstrip("/")
+CATALOG = required_param("catalog")
+BRONZE_SOURCE_CATALOG = required_param("bronze_source_catalog")
+BUNDLE_FILES_PATH = required_param("bundle_files_path").rstrip("/")
+CONTROL_ROOT = required_param("control_root").rstrip("/")
 FACT_WATERMARK = f"{CATALOG}.control.fact_watermark"
 CONTRACT_POLICY = f"{BUNDLE_FILES_PATH}/contracts/silver/_policy.yaml"
 CONTRACT_ENGINE = f"{BUNDLE_FILES_PATH}/quality/contract_engine.py"

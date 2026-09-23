@@ -19,39 +19,24 @@ def job_param(nome: str, default: str) -> str:
         return default
 
 
-def resolve_bundle_files_path() -> str:
-    explicit = job_param("bundle_files_path", "")
-    if explicit:
-        return explicit.rstrip("/")
-
+def required_param(nome: str) -> str:
+    """Parâmetro obrigatório do job: falha cedo em vez de cair num default de ambiente."""
     try:
-        raw = (
-            dbutils.notebook.entry_point.getDbutils()
-            .notebook()
-            .getContext()
-            .notebookPath()
-            .get()
-        )
-        workspace_path = raw if raw.startswith("/Workspace/") else f"/Workspace{raw}"
-        marker = "/pipeline/silver/transform_reference_dimensions"
-        if marker in workspace_path:
-            return workspace_path.split(marker, 1)[0]
+        value = dbutils.widgets.get(nome)
     except Exception:
-        pass
+        value = ""
+    if not value:
+        raise ValueError(
+            f"Parâmetro obrigatório ausente: '{nome}'. Execute via job do bundle, "
+            "que injeta catalog/bundle_files_path/control_root/bronze_source_catalog por target."
+        )
+    return value
 
-    # Fallback somente para compatibilidade manual antiga.
-    return "/Workspace/Users/<USER>/varejinho-data-platform"
 
+CATALOG = required_param("catalog")
+BUNDLE_FILES_PATH = required_param("bundle_files_path").rstrip("/")
+CONTROL_ROOT = required_param("control_root")
 
-CATALOG = job_param("catalog", "varejinho_dev")
-BUNDLE_FILES_PATH = resolve_bundle_files_path()
-CONTROL_ROOT = job_param("control_root", "s3://varejinho-lake/_control/dev")
-
-if not CATALOG.endswith("_dev"):
-    raise Exception(
-        f"transform_reference_dimensions só pode executar em *_dev durante hardening. "
-        f"Recebido: {CATALOG}"
-    )
 
 DRIFT_RUNTIME_PATH = f"{BUNDLE_FILES_PATH}/quality/schema_drift_runtime.py"
 _drift_spec = importlib.util.spec_from_file_location(

@@ -82,6 +82,10 @@ targets:
           parameters:
             - name: catalog
               default: ${var.catalog}
+            - name: bundle_files_path
+              default: ${workspace.file_path}
+            - name: control_root
+              default: ${var.control_root}
           tasks:
             - task_key: apply_incremental_supplier_scd2
               notebook_task:
@@ -137,6 +141,10 @@ targets:
           parameters:
             - name: catalog
               default: ${var.catalog}
+            - name: bundle_files_path
+              default: ${workspace.file_path}
+            - name: control_root
+              default: ${var.control_root}
           tasks:
             - task_key: apply_incremental_mercadologico_scd2
               notebook_task:
@@ -192,6 +200,10 @@ targets:
           parameters:
             - name: catalog
               default: ${var.catalog}
+            - name: bundle_files_path
+              default: ${workspace.file_path}
+            - name: control_root
+              default: ${var.control_root}
           tasks:
             - task_key: apply_incremental_product_scd2
               notebook_task:
@@ -244,6 +256,8 @@ targets:
               default: ${workspace.file_path}
             - name: control_root
               default: ${var.control_root}
+            - name: bronze_source_catalog
+              default: ${var.bronze_source_catalog}
           tasks:
             - task_key: apply_notaentrada
               notebook_task:

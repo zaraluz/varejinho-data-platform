@@ -24,13 +24,24 @@ def job_param(nome: str, default: str) -> str:
         return default
 
 
-CATALOG = job_param("catalog", "varejinho_dev")
-BRONZE_SOURCE_CATALOG = job_param("bronze_source_catalog", "varejinho")
-BUNDLE_FILES_PATH = job_param(
-    "bundle_files_path",
-    "/Workspace/Users/<USER>/varejinho-data-platform",
-)
-CONTROL_ROOT = job_param("control_root", "s3://varejinho-lake/_control/dev")
+def required_param(nome: str) -> str:
+    """Parâmetro obrigatório do job: falha cedo em vez de cair num default de ambiente."""
+    try:
+        value = dbutils.widgets.get(nome)
+    except Exception:
+        value = ""
+    if not value:
+        raise ValueError(
+            f"Parâmetro obrigatório ausente: '{nome}'. Execute via job do bundle, "
+            "que injeta catalog/bundle_files_path/control_root/bronze_source_catalog por target."
+        )
+    return value
+
+
+CATALOG = required_param("catalog")
+BRONZE_SOURCE_CATALOG = required_param("bronze_source_catalog")
+BUNDLE_FILES_PATH = required_param("bundle_files_path").rstrip("/")
+CONTROL_ROOT = required_param("control_root")
 CONTROL_TABLE = job_param("control_table", f"{CATALOG}.control.fact_watermark")
 MATURE_CUTOFF_OVERRIDE = job_param("mature_cutoff_override", "")
 
@@ -45,10 +56,6 @@ HISTORY = job_param(
     f"{CATALOG}.silver._quarantine_history_venda",
 )
 
-if not CATALOG.endswith("_dev"):
-    raise Exception(
-        f"incremental_sales só pode executar em *_dev durante hardening. Recebido: {CATALOG}"
-    )
 
 CONTRACT_RUNTIME_PATH = f"{BUNDLE_FILES_PATH}/quality/contract_runtime.py"
 _runtime_spec = importlib.util.spec_from_file_location(

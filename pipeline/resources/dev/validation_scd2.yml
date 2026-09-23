@@ -231,6 +231,10 @@ targets:
           parameters:
             - name: catalog
               default: ${var.catalog}
+            - name: bundle_files_path
+              default: ${workspace.file_path}
+            - name: control_root
+              default: ${var.control_root}
           tasks:
             - task_key: prepare_supplier_incremental_fixture
               notebook_task:
@@ -296,6 +300,10 @@ targets:
           parameters:
             - name: catalog
               default: ${var.catalog}
+            - name: bundle_files_path
+              default: ${workspace.file_path}
+            - name: control_root
+              default: ${var.control_root}
           tasks:
             - task_key: prepare_supplier_replay
               notebook_task:
@@ -349,6 +357,11 @@ targets:
             purpose: validation
             block: scd2
           max_concurrent_runs: 1
+          parameters:
+            - name: bundle_files_path
+              default: ${workspace.file_path}
+            - name: control_root
+              default: ${var.control_root}
           tasks:
             - task_key: prepare_product_generic_regression
               notebook_task:
@@ -502,6 +515,10 @@ targets:
           parameters:
             - name: catalog
               default: ${var.catalog}
+            - name: bundle_files_path
+              default: ${workspace.file_path}
+            - name: control_root
+              default: ${var.control_root}
           tasks:
             - task_key: prepare_mercadologico_incremental_fixture
               notebook_task:
@@ -567,6 +584,10 @@ targets:
           parameters:
             - name: catalog
               default: ${var.catalog}
+            - name: bundle_files_path
+              default: ${workspace.file_path}
+            - name: control_root
+              default: ${var.control_root}
           tasks:
             - task_key: prepare_mercadologico_replay
               notebook_task:
@@ -623,6 +644,10 @@ targets:
           parameters:
             - name: catalog
               default: ${var.catalog}
+            - name: bundle_files_path
+              default: ${workspace.file_path}
+            - name: control_root
+              default: ${var.control_root}
           tasks:
             - task_key: prepare_replay_sandbox
               notebook_task:

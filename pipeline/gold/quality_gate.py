@@ -9,8 +9,22 @@ def job_param(nome: str, default: str) -> str:
         return default
 
 
-CATALOG = job_param("catalog", "varejinho")
-BRONZE_SOURCE_CATALOG = job_param("bronze_source_catalog", "varejinho")
+def required_param(nome: str) -> str:
+    """Parâmetro obrigatório do job: falha cedo em vez de cair num default de ambiente."""
+    try:
+        value = dbutils.widgets.get(nome)
+    except Exception:
+        value = ""
+    if not value:
+        raise ValueError(
+            f"Parâmetro obrigatório ausente: '{nome}'. Execute via job do bundle, "
+            "que injeta catalog/bundle_files_path/control_root/bronze_source_catalog por target."
+        )
+    return value
+
+
+CATALOG = required_param("catalog")
+BRONZE_SOURCE_CATALOG = required_param("bronze_source_catalog")
 resultados = []
 
 

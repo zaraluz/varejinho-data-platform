@@ -64,6 +64,8 @@ targets:
               default: ${var.catalog}
             - name: bundle_files_path
               default: ${workspace.file_path}
+            - name: bronze_source_catalog
+              default: ${var.bronze_source_catalog}
           tasks:
             - task_key: guard_dev_only
               notebook_task:

@@ -38,6 +38,8 @@ targets:
               default: ${workspace.file_path}
             - name: control_root
               default: ${var.control_root}/d7c
+            - name: bronze_source_catalog
+              default: ${var.bronze_source_catalog}
           tasks:
             - task_key: prepare_sales_incremental_fixture
               notebook_task:
