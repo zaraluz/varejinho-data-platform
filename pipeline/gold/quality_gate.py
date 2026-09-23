@@ -10,6 +10,7 @@ def job_param(nome: str, default: str) -> str:
 
 
 CATALOG = job_param("catalog", "varejinho")
+BRONZE_SOURCE_CATALOG = job_param("bronze_source_catalog", "varejinho")
 resultados = []
 
 
@@ -339,10 +340,45 @@ check(
 )
 
 if orphans:
+    orphan_rows = parcela.join(
+        pagarfornecedor.select(F.col("id").alias("_silver_parent_id")),
+        F.col("pp.id_pagarfornecedor") == F.col("_silver_parent_id"),
+        "left_anti",
+    )
+    bronze_parent_ids = (
+        spark.table(f"{BRONZE_SOURCE_CATALOG}.bronze.pagarfornecedor")
+        .select(F.col("id").alias("_bronze_parent_id"))
+        .filter(F.col("_bronze_parent_id").isNotNull())
+        .distinct()
+    )
+    orphan_parent_present_bronze = (
+        orphan_rows.join(
+            bronze_parent_ids,
+            F.col("pp.id_pagarfornecedor") == F.col("_bronze_parent_id"),
+            "inner",
+        )
+        .select(F.col("pp.id_pagarfornecedor"))
+        .distinct()
+        .count()
+    )
+else:
+    orphan_parent_present_bronze = 0
+
+check(
+    "fato_contas_pagar — órfãs explicadas pela fonte",
+    orphan_parent_present_bronze == 0,
+    (
+        f"(órfãs Silver: {orphans:,} | parent IDs órfãos que existem na Bronze: "
+        f"{orphan_parent_present_bronze:,})"
+    ),
+)
+
+if orphans:
     print(
         f"⚠️ fato_contas_pagar source limitation: {orphans:,} parcela(s) Silver "
-        "não possuem pagarfornecedor correspondente e, por definição do INNER JOIN, "
-        "não são elegíveis para a Gold."
+        "não possuem pagarfornecedor correspondente; nenhum parent órfão existe "
+        "na Bronze atual, portanto essas linhas não são materializáveis com o grain "
+        "Gold vigente."
     )
 
 # ── fato_outras_despesas ─────────────────────────────────────
