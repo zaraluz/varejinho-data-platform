@@ -9,6 +9,14 @@
 
 from pyspark.sql import Window
 from pyspark.sql import functions as F
+from pyspark.sql.types import (
+    DateType,
+    IntegerType,
+    LongType,
+    StringType,
+    StructField,
+    StructType,
+)
 
 
 def job_param(name: str, default: str) -> str:
@@ -245,7 +253,20 @@ for entity, cfg in CONFIG.items():
         )
     print()
 
-summary_df = spark.createDataFrame(summary)
+summary_schema = StructType(
+    [
+        StructField("entity", StringType(), False),
+        StructField("reappearance_rows", LongType(), False),
+        StructField("distinct_ids", LongType(), False),
+        StructField("same_type2", LongType(), False),
+        StructField("changed_type2", LongType(), False),
+        StructField("type1_changed", LongType(), False),
+        StructField("latest_reappearance", DateType(), True),
+        StructField("max_observation_gap_days", IntegerType(), True),
+    ]
+)
+
+summary_df = spark.createDataFrame(summary, schema=summary_schema)
 print("=== R3 FINAL SUMMARY ===")
 summary_df.orderBy("entity").show(truncate=False)
 
