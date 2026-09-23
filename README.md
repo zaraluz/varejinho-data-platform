@@ -254,7 +254,7 @@ Runtime notebooks have no environment defaults: `catalog`, `bundle_files_path`, 
 
 ## Governance and scope
 
-- **Production** is the release environment of this project on Databricks Free Edition. The company's operational reporting does not depend on it, and real data is used with the company's approval. Moving to a paid workspace is a change of `workspace.host` in the target.
+- **Production** is the release environment of this project on Databricks Free Edition. The company's operational reporting does not depend on it, and using real company data in this environment is subject to the company's authorization. Moving to a paid workspace is a change of `workspace.host` in the target.
 - **Least privilege.** Production jobs run as a service principal with versioned Unity Catalog grants: read-only Bronze; read, write and create on Silver, Gold and control; no admin rights. Bundle files live in a restricted folder, because whoever can edit the code a service principal runs effectively holds its privileges.
 - **Data minimization.** Supplier fields such as credentials, personal documents and phone numbers are excluded from Silver by an explicit allowlist.
 - **This repository contains code only.** No business data is committed; fixtures use synthetic identifiers. Code is published for portfolio review; all rights reserved.
@@ -276,4 +276,4 @@ Stated plainly, because a platform is only as trustworthy as its documented edge
 
 ---
 
-Built by **Zara Louise**: data analyst who designed, operated and rebuilt this platform end to end.
+Built by **Zara Louise**, the data analyst who designed, operated and rebuilt this platform end to end · [LinkedIn](https://www.linkedin.com/in/zaralouiseluz/)
