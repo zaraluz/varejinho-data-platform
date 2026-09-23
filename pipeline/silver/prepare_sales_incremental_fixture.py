@@ -4,6 +4,7 @@
 # Também cria explicitamente o baseline de Schema Drift dentro do sandbox D7C.
 
 import importlib.util
+from datetime import date
 
 from pyspark.sql import functions as F
 
@@ -119,6 +120,29 @@ SchemaDriftEngine(
     reason="D7C sandbox baseline from initial committed Silver fixture",
 )
 
+MANIFEST_ENGINE_PATH = f"{BUNDLE_FILES_PATH}/quality/partition_manifest.py"
+_manifest_spec = importlib.util.spec_from_file_location(
+    "d7c_partition_manifest_engine",
+    MANIFEST_ENGINE_PATH,
+)
+if _manifest_spec is None or _manifest_spec.loader is None:
+    raise ImportError(
+        f"Não foi possível carregar partition manifest engine: {MANIFEST_ENGINE_PATH}"
+    )
+_manifest_module = importlib.util.module_from_spec(_manifest_spec)
+_manifest_spec.loader.exec_module(_manifest_module)
+FactPartitionManifestGuard = _manifest_module.FactPartitionManifestGuard
+
+manifest_bootstrap = FactPartitionManifestGuard(
+    spark=spark,
+    dbutils=dbutils,
+    control_root=DRIFT_CONTROL_ROOT,
+).bootstrap(
+    entity="venda",
+    source_table=BRONZE,
+    committed=date(2026, 9, 1),
+)
+
 spark.sql(f"""
     CREATE TABLE {CONTROL} (
         entity STRING NOT NULL,
@@ -139,4 +163,8 @@ print("D1 committed; D2 madura; D3 aberta.")
 print("D2 inclui update idempotente, insert novo e 1 inválido.")
 print("Expected: somente D2 entra; D3 fica intocada.")
 print(f"Drift registry: {DRIFT_CONTROL_ROOT}/schema_registry/venda.json")
-print("✅ Sandbox criado com baseline de drift explícito e isolado.")
+print(
+    f"Mutation manifest: rows={manifest_bootstrap['rows']} "
+    f"| created={manifest_bootstrap['created']}"
+)
+print("✅ Sandbox criado com baselines de drift + mutation guard explícitos e isolados.")
