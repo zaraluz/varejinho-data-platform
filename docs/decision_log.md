@@ -502,3 +502,48 @@ D4 initially compared a reduced synthetic `pedido` fixture schema against the re
 
 **Consequence**
 Schema Drift fixtures use their own control roots and may not write governance evidence into the real dev registry. Synthetic misrouted events are test pollution, not historical drift evidence.
+
+
+---
+
+## 2026-09-22 — dbt is a read-only validation/documentation layer over externally materialized Gold
+
+**Decision**
+Keep Gold materialization in the Databricks PySpark/SQL pipeline. Represent all 14 Gold relations in dbt as external `sources`; do not create phantom dbt models or set `materialized: table` for relations dbt does not build.
+
+Environment resolution is delegated to the native Databricks `dbt_task` connection:
+- dev → `varejinho_dev.gold`
+- prod → `varejinho.gold`
+
+No catalog is hardcoded in `sources.yml`.
+
+**Why**
+Ownership must match reality. The old project simultaneously declared Gold as sources and patched the same relations under `models:`, while `dbt_project.yml` hardcoded `varejinho.gold` and table materialization. That created misleading lineage and could cause a dev run to resolve prod objects.
+
+**Consequence**
+dbt now provides read-only tests, documentation metadata and lineage to externally built Gold. The legacy Python subprocess runner, tracked local log, phantom model YAML and duplicate singular test were removed. The canonical execution path is the native Databricks dbt task.
+
+Final dev evidence:
+- dbt Core **1.12.3**
+- dbt-databricks **1.12.5**
+- **14 Gold sources**
+- **46 data tests**
+- **44 PASS / 2 WARN / 0 ERROR / 0 SKIP**
+- **0 deprecation warnings** after moving source metadata to `config.meta`
+
+The two warnings are intentional business-anomaly monitors and do not represent pipeline failures.
+
+---
+
+## 2026-09-22 — dbt freshness and BI exposure require truthful runtime evidence
+
+**Decision**
+Do not configure dbt source freshness until Gold exposes a reliable technical load timestamp (or equivalent control signal) that represents the actual refresh time. Do not use a business date such as transaction date, event date or snapshot date as a fabricated `loaded_at_field`.
+
+Do not declare Power BI as a dbt exposure until the consumer is actually reconnected to this Gold layer.
+
+**Why**
+Freshness and exposure metadata are useful only when they describe real runtime dependencies. Inventing a load timestamp from a business field would produce false freshness semantics, while declaring a disconnected BI consumer would create fictional lineage.
+
+**Consequence**
+The current dbt block is considered complete without source freshness or a Power BI exposure. Those features become follow-up work when the underlying runtime signals/dependencies exist.
