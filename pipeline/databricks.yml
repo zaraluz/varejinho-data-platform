@@ -778,7 +778,7 @@ resources:
         - name: bundle_files_path
           default: ${workspace.file_path}
         - name: control_root
-          default: ${var.control_root}
+          default: ${var.control_root}/d4
       tasks:
         - task_key: prepare_fact_incremental_fixture
           notebook_task:
@@ -1254,7 +1254,7 @@ resources:
         - name: bundle_files_path
           default: ${workspace.file_path}
         - name: control_root
-          default: ${var.control_root}
+          default: ${var.control_root}/d6a
       tasks:
         - task_key: prepare_fact_maturity_fixture
           notebook_task:
@@ -1762,7 +1762,7 @@ resources:
         - name: bundle_files_path
           default: ${workspace.file_path}
         - name: control_root
-          default: ${var.control_root}
+          default: ${var.control_root}/d7c
       tasks:
         - task_key: prepare_sales_incremental_fixture
           notebook_task:
@@ -1839,7 +1839,7 @@ resources:
         - name: bundle_files_path
           default: ${workspace.file_path}
         - name: control_root
-          default: ${var.control_root}
+          default: ${var.control_root}/d7d
       tasks:
         - task_key: prepare_sales_real_replay
           notebook_task:
