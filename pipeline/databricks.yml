@@ -54,17 +54,22 @@ targets:
 
   prod:
     mode: production
-    # Arquivos de prod ficam em /Workspace/Shared, não na pasta pessoal de quem
-    # fez o deploy: o service principal precisa ler os notebooks para executá-los.
+    # Arquivos de prod ficam numa pasta restrita (não em /Workspace/Shared, que
+    # qualquer usuário do workspace pode editar: alguém alteraria um notebook que
+    # o service principal executa com privilégios de produção).
     workspace:
-      root_path: /Workspace/Shared/.bundle/${bundle.name}/${bundle.target}
+      root_path: /Workspace/Users/${workspace.current_user.userName}/.bundle/${bundle.name}/${bundle.target}
     # Jobs de prod executam como identidade de máquina (menor privilégio,
     # independente da conta pessoal). Quem faz o deploy continua sendo a autora.
     run_as:
       service_principal_name: bf71079b-64e1-4763-8b86-1e90718d8864  # sp-varejinho-pipeline-prod
+    # Permissões de topo valem para os jobs e para a pasta do bundle:
+    # a autora gerencia; o service principal só lê os arquivos que executa.
     permissions:
       - user_name: ${workspace.current_user.userName}
         level: CAN_MANAGE
+      - service_principal_name: bf71079b-64e1-4763-8b86-1e90718d8864
+        level: CAN_VIEW
     variables:
       catalog: varejinho
       bronze_source_catalog: varejinho
