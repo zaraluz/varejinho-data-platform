@@ -4,6 +4,7 @@
 # Também cria explicitamente o baseline de Schema Drift dentro do sandbox D4.
 
 import importlib.util
+from datetime import date
 
 from pyspark.sql import functions as F
 
@@ -100,6 +101,29 @@ SchemaDriftEngine(
     reason="D4 sandbox baseline from initial committed Silver fixture",
 )
 
+MANIFEST_ENGINE_PATH = f"{BUNDLE_FILES_PATH}/quality/partition_manifest.py"
+_manifest_spec = importlib.util.spec_from_file_location(
+    "d4_partition_manifest_engine",
+    MANIFEST_ENGINE_PATH,
+)
+if _manifest_spec is None or _manifest_spec.loader is None:
+    raise ImportError(
+        f"Não foi possível carregar partition manifest engine: {MANIFEST_ENGINE_PATH}"
+    )
+_manifest_module = importlib.util.module_from_spec(_manifest_spec)
+_manifest_spec.loader.exec_module(_manifest_module)
+FactPartitionManifestGuard = _manifest_module.FactPartitionManifestGuard
+
+manifest_bootstrap = FactPartitionManifestGuard(
+    spark=spark,
+    dbutils=dbutils,
+    control_root=DRIFT_CONTROL_ROOT,
+).bootstrap(
+    entity="pedido",
+    source_table=BRONZE,
+    committed=date(2026, 9, 1),
+)
+
 spark.sql(f"""
     CREATE TABLE {CONTROL} (
         entity STRING NOT NULL,
@@ -119,6 +143,10 @@ print(f"Bronze sandbox: {BRONZE}")
 print(f"Silver baseline:{SILVER}")
 print(f"Control:        {CONTROL}")
 print(f"Drift registry: {DRIFT_CONTROL_ROOT}/schema_registry/pedido.json")
+print(
+    f"Mutation manifest: rows={manifest_bootstrap['rows']} "
+    f"| created={manifest_bootstrap['created']}"
+)
 print("Cenários: D2/D3 pendentes, update, insert, ausência sem delete e quarentena.")
 print("✅ Fixture pronta; baseline de drift criado somente no sandbox D4.")
 print("✅ Nenhum dado real foi alterado.")
