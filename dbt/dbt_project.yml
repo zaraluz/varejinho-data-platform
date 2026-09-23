@@ -1,5 +1,6 @@
 name: 'varejinho'
 version: '1.0.0'
+config-version: 2
 profile: 'varejinho'
 
 model-paths: ["models"]
@@ -12,10 +13,3 @@ analysis-paths: ["analyses"]
 clean-targets:
   - "target"
   - "dbt_packages"
-
-models:
-  varejinho:
-    +catalog: varejinho
-    +schema: gold
-    +materialized: table
-    +file_format: delta
