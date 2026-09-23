@@ -1,57 +1,127 @@
 version: 2
 
 sources:
-  - name: silver
-    catalog: varejinho
-    schema: silver
-    description: "Camada Silver — dados tipados, deduplicados e com SCD2 aplicado"
-    tables:
-      - name: venda
-        description: "Vendas do PDV — grão: 1 linha por item vendido"
-      - name: perda
-        description: "Perdas e quebras por produto e loja"
-      - name: logestoque
-        description: "Log de movimentações de estoque — cobre lojas e CD"
-      - name: pedido
-        description: "Cabeçalho dos pedidos de compra"
-      - name: pedidoitem
-        description: "Itens dos pedidos de compra — grão: 1 linha por item"
-      - name: oferta
-        description: "Ofertas por produto e loja — inclui ofertas futuras"
-      - name: promocao
-        description: "Promoções cadastradas — inclui promoções futuras"
-      - name: promocaoitem
-        description: "Itens das promoções"
-      - name: pagarfornecedorparcela
-        description: "Parcelas de pagamento a fornecedores"
-      - name: pagaroutrasdespesas
-        description: "Despesas operacionais"
-      - name: curvaabc
-        description: "Classificação ABC por produto/loja — fato snapshot"
-      - name: produto
-        description: "Dimensão produto com histórico SCD2"
-      - name: fornecedor
-        description: "Dimensão fornecedor com histórico SCD2"
-      - name: mercadologico
-        description: "Hierarquia mercadológica com histórico SCD2"
-      - name: loja
-        description: "Dimensão loja — 2 lojas + CD"
   - name: gold
-    catalog: varejinho
     schema: gold
-    description: "Camada Gold — Star Schema para consumo analítico"
+    description: "Gold Star Schema materialized by the Databricks PySpark/SQL pipeline. dbt is a read-only test/documentation consumer of these relations."
+    meta:
+      materialized_by: "Databricks PySpark/SQL pipeline"
+      dbt_ownership: "external_source"
+
     tables:
       - name: fato_vendas
+        description: "Sales fact — grain: one sold item per transaction/store."
+        columns:
+          - name: sk_venda
+            description: "Fact surrogate key: MD5(source sale id + id_loja)."
+            data_tests: [not_null, unique]
+          - name: sk_produto
+            description: "Temporal FK to dim_produto."
+            data_tests: [not_null]
+          - name: id_loja
+            description: "Store/CD identifier."
+            data_tests:
+              - not_null
+              - accepted_values:
+                  arguments:
+                    values: [1, 2, 3]
+          - name: sk_tempo
+            description: "Calendar FK in YYYYMMDD integer format."
+            data_tests: [not_null]
+          - name: valor_total
+            data_tests: [not_null]
+
       - name: fato_compras
+        description: "Purchases fact — grain: one purchase-order item."
+        columns:
+          - name: sk_compra
+            data_tests: [not_null, unique]
+          - name: sk_fornecedor
+            description: "Temporal supplier FK. Current validated state has no unresolved supplier keys."
+            data_tests: [not_null]
+
       - name: fato_perdas
+        description: "Losses fact — grain: one loss record."
+        columns:
+          - name: sk_perda
+            data_tests: [not_null, unique]
+          - name: sk_produto
+            data_tests: [not_null]
+
       - name: fato_movimento_estoque
+        description: "Inventory movement fact — grain: one inventory movement."
+        columns:
+          - name: sk_movimento
+            data_tests: [not_null, unique]
+
       - name: fato_oferta
+        description: "Offer fact — grain: one product offer per store."
+        columns:
+          - name: sk_oferta
+            data_tests: [not_null, unique]
+          - name: sk_produto
+            data_tests: [not_null]
+
       - name: fato_promocoes
+        description: "Promotion fact — grain: one promotion item/store."
+        columns:
+          - name: sk_promocao
+            data_tests: [not_null, unique]
+
       - name: fato_contas_pagar
+        description: "Accounts payable fact — grain: one supplier-payment installment."
+        columns:
+          - name: sk_parcela
+            data_tests: [not_null, unique]
+
       - name: fato_outras_despesas
+        description: "Other operating expenses fact — grain: one expense."
+        columns:
+          - name: sk_despesa
+            data_tests: [not_null, unique]
+
       - name: fato_curva_abc
+        description: "ABC curve snapshot fact — grain: product/store/snapshot_date."
+        columns:
+          - name: sk_curva
+            data_tests: [not_null, unique]
+          - name: sk_produto
+            data_tests: [not_null]
+
       - name: dim_produto
+        description: "Product SCD2 dimension."
+        columns:
+          - name: sk_produto
+            data_tests: [not_null, unique]
+          - name: id_produto
+            data_tests: [not_null]
+          - name: is_current
+            data_tests:
+              - not_null
+              - accepted_values:
+                  arguments:
+                    values: [true, false]
+
       - name: dim_fornecedor
+        description: "Supplier SCD2 dimension."
+        columns:
+          - name: sk_fornecedor
+            data_tests: [not_null, unique]
+
       - name: dim_loja
+        description: "Store/CD dimension."
+        columns:
+          - name: sk_loja
+            data_tests: [not_null, unique]
+
       - name: dim_mercadologico
+        description: "Merchandising hierarchy SCD2 dimension."
+        columns:
+          - name: sk_mercadologico
+            data_tests: [not_null, unique]
+
       - name: dim_tempo
+        description: "Calendar dimension generated by code for 2023-01-01 through 2027-12-31."
+        columns:
+          - name: sk_tempo
+            data_tests: [not_null, unique]
