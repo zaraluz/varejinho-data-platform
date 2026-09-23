@@ -1,5 +1,5 @@
 # Databricks notebook source
-# pipeline/silver/validate_fact_maturity_repair.py
+# ops/repair/validate_fact_maturity_repair.py
 # Gate D6B — valida one-time repair antes de corrigir o committed watermark.
 
 from functools import reduce

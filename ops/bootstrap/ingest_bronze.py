@@ -1,5 +1,5 @@
 # Databricks notebook source
-# pipeline/bronze/ingest_bronze.py
+# ops/bootstrap/ingest_bronze.py
 # Bootstrap idempotente do ambiente.
 # Em prod, garante as external tables da Bronze sobre o S3.
 # Em dev, cria views sobre a Bronze de prod para evitar sobreposição de paths

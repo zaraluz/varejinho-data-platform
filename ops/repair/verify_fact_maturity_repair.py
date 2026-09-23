@@ -1,5 +1,5 @@
 # Databricks notebook source
-# pipeline/silver/verify_fact_maturity_repair.py
+# ops/repair/verify_fact_maturity_repair.py
 # Gate D6B — verificação final do repair real das 13 facts.
 
 from pyspark.sql import functions as F

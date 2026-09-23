@@ -1,5 +1,5 @@
 # Databricks notebook source
-# pipeline/silver/build_scd2_supplier.py
+# ops/backfill/build_scd2_supplier.py
 # Gate B7C/B7D — reconstrução determinística do histórico SCD2 de fornecedor.
 # Pode receber tabelas sandbox por parâmetro; durante o hardening só aceita catálogo *_dev.
 

@@ -1,5 +1,5 @@
 # Databricks notebook source
-# pipeline/silver/repair_fact_maturity_baseline.py
+# ops/repair/repair_fact_maturity_baseline.py
 # Gate D6B — one-time repair do baseline real após descoberta da regra D+1.
 #
 # Estratégia:

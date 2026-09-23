@@ -1,5 +1,5 @@
 # Databricks notebook source
-# pipeline/silver/commit_fact_maturity_repair.py
+# ops/repair/commit_fact_maturity_repair.py
 # Gate D6B — commit especial que permite corrigir watermark para trás se necessário.
 
 from pyspark.sql import functions as F

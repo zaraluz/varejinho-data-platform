@@ -1,5 +1,5 @@
 # Databricks notebook source
-# pipeline/silver/seed_fact_watermark.py
+# ops/seed/seed_fact_watermark.py
 # Gate D3 — cria/semeia o estado de controle para Bronze -> Silver incremental.
 #
 # Pré-condição operacional: Gate D2 aprovado.

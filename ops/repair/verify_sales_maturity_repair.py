@@ -1,5 +1,5 @@
 # Databricks notebook source
-# pipeline/silver/verify_sales_maturity_repair.py
+# ops/repair/verify_sales_maturity_repair.py
 # Gate D7B — verificação final do repair + watermark de venda.
 
 from pyspark.sql import functions as F

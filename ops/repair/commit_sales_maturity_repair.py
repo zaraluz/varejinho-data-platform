@@ -1,5 +1,5 @@
 # Databricks notebook source
-# pipeline/silver/commit_sales_maturity_repair.py
+# ops/repair/commit_sales_maturity_repair.py
 # Gate D7B — promove o mature cutoff de venda após validação.
 
 from pyspark.sql import functions as F

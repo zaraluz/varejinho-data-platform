@@ -1,5 +1,5 @@
 # Databricks notebook source
-# pipeline/silver/build_scd2_product.py
+# ops/backfill/build_scd2_product.py
 # Gate B3 — reconstrução determinística do histórico SCD2 de produto a partir dos snapshots Bronze.
 # IMPORTANTE: durante o hardening este notebook só aceita catálogo *_dev.
 

@@ -1,5 +1,5 @@
 # Databricks notebook source
-# pipeline/silver/build_scd2_mercadologico.py
+# ops/backfill/build_scd2_mercadologico.py
 # Gate B8B — backfill determinístico do SCD2 mercadológico.
 # Sem timestamp de ERP: valid_from = primeiro snapshot em que o estado foi observado.
 

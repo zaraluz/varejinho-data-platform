@@ -1,5 +1,5 @@
 # Databricks notebook source
-# pipeline/silver/validate_sales_maturity_repair.py
+# ops/repair/validate_sales_maturity_repair.py
 # Gate D7B — prova equivalência exata da venda madura antes do seed/commit.
 
 from functools import reduce

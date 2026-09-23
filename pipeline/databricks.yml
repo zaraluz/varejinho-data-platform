@@ -21,6 +21,7 @@ sync:
     - .
     - ../contracts
     - ../quality
+    - ../ops
 
 targets:
   dev:
@@ -74,7 +75,7 @@ resources:
           depends_on:
             - task_key: prepare_reappearance_fixture
           notebook_task:
-            notebook_path: ${workspace.file_path}/pipeline/silver/build_scd2_supplier.py
+            notebook_path: ${workspace.file_path}/ops/backfill/build_scd2_supplier.py
             base_parameters:
               bronze_table: ${var.catalog}.control._r3_supplier_reappearance_baseline_bronze
               silver_table: ${var.catalog}.silver._r3_supplier_reappearance_incremental
@@ -84,7 +85,7 @@ resources:
           depends_on:
             - task_key: prepare_reappearance_fixture
           notebook_task:
-            notebook_path: ${workspace.file_path}/pipeline/silver/build_scd2_supplier.py
+            notebook_path: ${workspace.file_path}/ops/backfill/build_scd2_supplier.py
             base_parameters:
               bronze_table: ${var.catalog}.control._r3_supplier_reappearance_full_bronze
               silver_table: ${var.catalog}.silver._r3_supplier_reappearance_expected
@@ -207,7 +208,7 @@ resources:
       tasks:
         - task_key: bootstrap_fact_partition_manifests
           notebook_task:
-            notebook_path: ${workspace.file_path}/pipeline/silver/bootstrap_fact_partition_manifests.py
+            notebook_path: ${workspace.file_path}/ops/seed/bootstrap_fact_partition_manifests.py
           description: "Bootstrap explícito dos manifests das 14 facts até o watermark committed atual"
 
     bootstrap_environment:
@@ -221,14 +222,14 @@ resources:
       tasks:
         - task_key: register_bronze
           notebook_task:
-            notebook_path: ${workspace.file_path}/pipeline/bronze/ingest_bronze.py
+            notebook_path: ${workspace.file_path}/ops/bootstrap/ingest_bronze.py
           description: "Cria catálogo/schemas; prod registra Bronze external, dev cria views read-only sobre a Bronze raw"
 
         - task_key: validate_isolation
           depends_on:
             - task_key: register_bronze
           notebook_task:
-            notebook_path: ${workspace.file_path}/pipeline/bootstrap/validate_environment.py
+            notebook_path: ${workspace.file_path}/ops/bootstrap/validate_environment.py
           description: "Prova que Bronze dev referencia o raw e que escritas Silver permanecem isoladas"
 
     scd2_profile:
@@ -295,7 +296,7 @@ resources:
           depends_on:
             - task_key: prepare_supplier_fixture
           notebook_task:
-            notebook_path: ${workspace.file_path}/pipeline/silver/build_scd2_supplier.py
+            notebook_path: ${workspace.file_path}/ops/backfill/build_scd2_supplier.py
             base_parameters:
               bronze_table: ${var.catalog}.control._b7_supplier_fixture_bronze
               silver_table: ${var.catalog}.silver._b7_supplier_fixture
@@ -327,7 +328,7 @@ resources:
       tasks:
         - task_key: rebuild_supplier_history
           notebook_task:
-            notebook_path: ${workspace.file_path}/pipeline/silver/build_scd2_supplier.py
+            notebook_path: ${workspace.file_path}/ops/backfill/build_scd2_supplier.py
           description: "Reconstrói fornecedor SCD2 real em dev após aprovação da fixture"
 
         - task_key: validate_supplier_history
@@ -353,7 +354,7 @@ resources:
           depends_on:
             - task_key: prepare_supplier_incremental_fixture
           notebook_task:
-            notebook_path: ${workspace.file_path}/pipeline/silver/build_scd2_supplier.py
+            notebook_path: ${workspace.file_path}/ops/backfill/build_scd2_supplier.py
             base_parameters:
               bronze_table: ${var.catalog}.control._b7e_supplier_baseline_bronze
               silver_table: ${var.catalog}.silver._b7e_supplier_incremental
@@ -497,7 +498,7 @@ resources:
           depends_on:
             - task_key: prepare_product_generic_regression
           notebook_task:
-            notebook_path: ${workspace.file_path}/pipeline/silver/build_scd2_product.py
+            notebook_path: ${workspace.file_path}/ops/backfill/build_scd2_product.py
             base_parameters:
               catalog: ${var.catalog}
               bronze_table: ${var.catalog}.control._b7h_product_baseline_bronze
@@ -508,7 +509,7 @@ resources:
           depends_on:
             - task_key: prepare_product_generic_regression
           notebook_task:
-            notebook_path: ${workspace.file_path}/pipeline/silver/build_scd2_product.py
+            notebook_path: ${workspace.file_path}/ops/backfill/build_scd2_product.py
             base_parameters:
               catalog: ${var.catalog}
               bronze_table: ${var.catalog}.control._b7h_product_test_bronze
@@ -600,7 +601,7 @@ resources:
           depends_on:
             - task_key: prepare_mercadologico_fixture
           notebook_task:
-            notebook_path: ${workspace.file_path}/pipeline/silver/build_scd2_mercadologico.py
+            notebook_path: ${workspace.file_path}/ops/backfill/build_scd2_mercadologico.py
             base_parameters:
               bronze_table: ${var.catalog}.control._b8_mercadologico_fixture_bronze
               silver_table: ${var.catalog}.silver._b8_mercadologico_fixture
@@ -632,7 +633,7 @@ resources:
       tasks:
         - task_key: rebuild_mercadologico_history
           notebook_task:
-            notebook_path: ${workspace.file_path}/pipeline/silver/build_scd2_mercadologico.py
+            notebook_path: ${workspace.file_path}/ops/backfill/build_scd2_mercadologico.py
           description: "Reconstrói mercadologico com valid_from no primeiro snapshot observado"
 
         - task_key: validate_mercadologico_history
@@ -658,7 +659,7 @@ resources:
           depends_on:
             - task_key: prepare_mercadologico_incremental_fixture
           notebook_task:
-            notebook_path: ${workspace.file_path}/pipeline/silver/build_scd2_mercadologico.py
+            notebook_path: ${workspace.file_path}/ops/backfill/build_scd2_mercadologico.py
             base_parameters:
               bronze_table: ${var.catalog}.control._b8d_mercadologico_baseline_bronze
               silver_table: ${var.catalog}.silver._b8d_mercadologico_incremental
@@ -796,7 +797,7 @@ resources:
       tasks:
         - task_key: rebuild_product_history
           notebook_task:
-            notebook_path: ${workspace.file_path}/pipeline/silver/build_scd2_product.py
+            notebook_path: ${workspace.file_path}/ops/backfill/build_scd2_product.py
           description: "Reconstrói produto SCD2 a partir dos snapshots Bronze usando a política Type 1/Type 2 aprovada"
 
         - task_key: validate_product_history
@@ -924,7 +925,7 @@ resources:
       tasks:
         - task_key: seed_fact_watermarks
           notebook_task:
-            notebook_path: ${workspace.file_path}/pipeline/silver/seed_fact_watermark.py
+            notebook_path: ${workspace.file_path}/ops/seed/seed_fact_watermark.py
           description: "Semeia 13 watermarks a partir do maior ingestion_date já comprovadamente materializado na Silver"
 
     facts_incremental_fixture:
@@ -1478,7 +1479,7 @@ resources:
       tasks:
         - task_key: repair_notaentrada
           notebook_task:
-            notebook_path: ${workspace.file_path}/pipeline/silver/repair_fact_maturity_baseline.py
+            notebook_path: ${workspace.file_path}/ops/repair/repair_fact_maturity_baseline.py
             base_parameters:
               entity: notaentrada
               repair_from: "2026-09-18"
@@ -1488,7 +1489,7 @@ resources:
           depends_on:
             - task_key: repair_notaentrada
           notebook_task:
-            notebook_path: ${workspace.file_path}/pipeline/silver/validate_fact_maturity_repair.py
+            notebook_path: ${workspace.file_path}/ops/repair/validate_fact_maturity_repair.py
             base_parameters:
               entity: notaentrada
               repair_from: "2026-09-18"
@@ -1498,7 +1499,7 @@ resources:
           depends_on:
             - task_key: validate_repair_notaentrada
           notebook_task:
-            notebook_path: ${workspace.file_path}/pipeline/silver/commit_fact_maturity_repair.py
+            notebook_path: ${workspace.file_path}/ops/repair/commit_fact_maturity_repair.py
             base_parameters:
               entity: notaentrada
           description: "Corrige watermark de notaentrada para o mature_cutoff somente após validação"
@@ -1507,7 +1508,7 @@ resources:
           depends_on:
             - task_key: commit_repair_notaentrada
           notebook_task:
-            notebook_path: ${workspace.file_path}/pipeline/silver/repair_fact_maturity_baseline.py
+            notebook_path: ${workspace.file_path}/ops/repair/repair_fact_maturity_baseline.py
             base_parameters:
               entity: notaentradaitem
               repair_from: "2026-09-18"
@@ -1517,7 +1518,7 @@ resources:
           depends_on:
             - task_key: repair_notaentradaitem
           notebook_task:
-            notebook_path: ${workspace.file_path}/pipeline/silver/validate_fact_maturity_repair.py
+            notebook_path: ${workspace.file_path}/ops/repair/validate_fact_maturity_repair.py
             base_parameters:
               entity: notaentradaitem
               repair_from: "2026-09-18"
@@ -1527,7 +1528,7 @@ resources:
           depends_on:
             - task_key: validate_repair_notaentradaitem
           notebook_task:
-            notebook_path: ${workspace.file_path}/pipeline/silver/commit_fact_maturity_repair.py
+            notebook_path: ${workspace.file_path}/ops/repair/commit_fact_maturity_repair.py
             base_parameters:
               entity: notaentradaitem
           description: "Corrige watermark de notaentradaitem para o mature_cutoff somente após validação"
@@ -1536,7 +1537,7 @@ resources:
           depends_on:
             - task_key: commit_repair_notaentradaitem
           notebook_task:
-            notebook_path: ${workspace.file_path}/pipeline/silver/repair_fact_maturity_baseline.py
+            notebook_path: ${workspace.file_path}/ops/repair/repair_fact_maturity_baseline.py
             base_parameters:
               entity: perda
               repair_from: "2026-09-18"
@@ -1546,7 +1547,7 @@ resources:
           depends_on:
             - task_key: repair_perda
           notebook_task:
-            notebook_path: ${workspace.file_path}/pipeline/silver/validate_fact_maturity_repair.py
+            notebook_path: ${workspace.file_path}/ops/repair/validate_fact_maturity_repair.py
             base_parameters:
               entity: perda
               repair_from: "2026-09-18"
@@ -1556,7 +1557,7 @@ resources:
           depends_on:
             - task_key: validate_repair_perda
           notebook_task:
-            notebook_path: ${workspace.file_path}/pipeline/silver/commit_fact_maturity_repair.py
+            notebook_path: ${workspace.file_path}/ops/repair/commit_fact_maturity_repair.py
             base_parameters:
               entity: perda
           description: "Corrige watermark de perda para o mature_cutoff somente após validação"
@@ -1565,7 +1566,7 @@ resources:
           depends_on:
             - task_key: commit_repair_perda
           notebook_task:
-            notebook_path: ${workspace.file_path}/pipeline/silver/repair_fact_maturity_baseline.py
+            notebook_path: ${workspace.file_path}/ops/repair/repair_fact_maturity_baseline.py
             base_parameters:
               entity: logestoque
               repair_from: "2026-09-18"
@@ -1575,7 +1576,7 @@ resources:
           depends_on:
             - task_key: repair_logestoque
           notebook_task:
-            notebook_path: ${workspace.file_path}/pipeline/silver/validate_fact_maturity_repair.py
+            notebook_path: ${workspace.file_path}/ops/repair/validate_fact_maturity_repair.py
             base_parameters:
               entity: logestoque
               repair_from: "2026-09-18"
@@ -1585,7 +1586,7 @@ resources:
           depends_on:
             - task_key: validate_repair_logestoque
           notebook_task:
-            notebook_path: ${workspace.file_path}/pipeline/silver/commit_fact_maturity_repair.py
+            notebook_path: ${workspace.file_path}/ops/repair/commit_fact_maturity_repair.py
             base_parameters:
               entity: logestoque
           description: "Corrige watermark de logestoque para o mature_cutoff somente após validação"
@@ -1594,7 +1595,7 @@ resources:
           depends_on:
             - task_key: commit_repair_logestoque
           notebook_task:
-            notebook_path: ${workspace.file_path}/pipeline/silver/repair_fact_maturity_baseline.py
+            notebook_path: ${workspace.file_path}/ops/repair/repair_fact_maturity_baseline.py
             base_parameters:
               entity: promocao
               repair_from: "2026-09-18"
@@ -1604,7 +1605,7 @@ resources:
           depends_on:
             - task_key: repair_promocao
           notebook_task:
-            notebook_path: ${workspace.file_path}/pipeline/silver/validate_fact_maturity_repair.py
+            notebook_path: ${workspace.file_path}/ops/repair/validate_fact_maturity_repair.py
             base_parameters:
               entity: promocao
               repair_from: "2026-09-18"
@@ -1614,7 +1615,7 @@ resources:
           depends_on:
             - task_key: validate_repair_promocao
           notebook_task:
-            notebook_path: ${workspace.file_path}/pipeline/silver/commit_fact_maturity_repair.py
+            notebook_path: ${workspace.file_path}/ops/repair/commit_fact_maturity_repair.py
             base_parameters:
               entity: promocao
           description: "Corrige watermark de promocao para o mature_cutoff somente após validação"
@@ -1623,7 +1624,7 @@ resources:
           depends_on:
             - task_key: commit_repair_promocao
           notebook_task:
-            notebook_path: ${workspace.file_path}/pipeline/silver/repair_fact_maturity_baseline.py
+            notebook_path: ${workspace.file_path}/ops/repair/repair_fact_maturity_baseline.py
             base_parameters:
               entity: promocaoitem
               repair_from: "2026-09-18"
@@ -1633,7 +1634,7 @@ resources:
           depends_on:
             - task_key: repair_promocaoitem
           notebook_task:
-            notebook_path: ${workspace.file_path}/pipeline/silver/validate_fact_maturity_repair.py
+            notebook_path: ${workspace.file_path}/ops/repair/validate_fact_maturity_repair.py
             base_parameters:
               entity: promocaoitem
               repair_from: "2026-09-18"
@@ -1643,7 +1644,7 @@ resources:
           depends_on:
             - task_key: validate_repair_promocaoitem
           notebook_task:
-            notebook_path: ${workspace.file_path}/pipeline/silver/commit_fact_maturity_repair.py
+            notebook_path: ${workspace.file_path}/ops/repair/commit_fact_maturity_repair.py
             base_parameters:
               entity: promocaoitem
           description: "Corrige watermark de promocaoitem para o mature_cutoff somente após validação"
@@ -1652,7 +1653,7 @@ resources:
           depends_on:
             - task_key: commit_repair_promocaoitem
           notebook_task:
-            notebook_path: ${workspace.file_path}/pipeline/silver/repair_fact_maturity_baseline.py
+            notebook_path: ${workspace.file_path}/ops/repair/repair_fact_maturity_baseline.py
             base_parameters:
               entity: pedido
               repair_from: "2026-09-18"
@@ -1662,7 +1663,7 @@ resources:
           depends_on:
             - task_key: repair_pedido
           notebook_task:
-            notebook_path: ${workspace.file_path}/pipeline/silver/validate_fact_maturity_repair.py
+            notebook_path: ${workspace.file_path}/ops/repair/validate_fact_maturity_repair.py
             base_parameters:
               entity: pedido
               repair_from: "2026-09-18"
@@ -1672,7 +1673,7 @@ resources:
           depends_on:
             - task_key: validate_repair_pedido
           notebook_task:
-            notebook_path: ${workspace.file_path}/pipeline/silver/commit_fact_maturity_repair.py
+            notebook_path: ${workspace.file_path}/ops/repair/commit_fact_maturity_repair.py
             base_parameters:
               entity: pedido
           description: "Corrige watermark de pedido para o mature_cutoff somente após validação"
@@ -1681,7 +1682,7 @@ resources:
           depends_on:
             - task_key: commit_repair_pedido
           notebook_task:
-            notebook_path: ${workspace.file_path}/pipeline/silver/repair_fact_maturity_baseline.py
+            notebook_path: ${workspace.file_path}/ops/repair/repair_fact_maturity_baseline.py
             base_parameters:
               entity: pedidoitem
               repair_from: "2026-09-18"
@@ -1691,7 +1692,7 @@ resources:
           depends_on:
             - task_key: repair_pedidoitem
           notebook_task:
-            notebook_path: ${workspace.file_path}/pipeline/silver/validate_fact_maturity_repair.py
+            notebook_path: ${workspace.file_path}/ops/repair/validate_fact_maturity_repair.py
             base_parameters:
               entity: pedidoitem
               repair_from: "2026-09-18"
@@ -1701,7 +1702,7 @@ resources:
           depends_on:
             - task_key: validate_repair_pedidoitem
           notebook_task:
-            notebook_path: ${workspace.file_path}/pipeline/silver/commit_fact_maturity_repair.py
+            notebook_path: ${workspace.file_path}/ops/repair/commit_fact_maturity_repair.py
             base_parameters:
               entity: pedidoitem
           description: "Corrige watermark de pedidoitem para o mature_cutoff somente após validação"
@@ -1710,7 +1711,7 @@ resources:
           depends_on:
             - task_key: commit_repair_pedidoitem
           notebook_task:
-            notebook_path: ${workspace.file_path}/pipeline/silver/repair_fact_maturity_baseline.py
+            notebook_path: ${workspace.file_path}/ops/repair/repair_fact_maturity_baseline.py
             base_parameters:
               entity: oferta
               repair_from: "2026-09-18"
@@ -1720,7 +1721,7 @@ resources:
           depends_on:
             - task_key: repair_oferta
           notebook_task:
-            notebook_path: ${workspace.file_path}/pipeline/silver/validate_fact_maturity_repair.py
+            notebook_path: ${workspace.file_path}/ops/repair/validate_fact_maturity_repair.py
             base_parameters:
               entity: oferta
               repair_from: "2026-09-18"
@@ -1730,7 +1731,7 @@ resources:
           depends_on:
             - task_key: validate_repair_oferta
           notebook_task:
-            notebook_path: ${workspace.file_path}/pipeline/silver/commit_fact_maturity_repair.py
+            notebook_path: ${workspace.file_path}/ops/repair/commit_fact_maturity_repair.py
             base_parameters:
               entity: oferta
           description: "Corrige watermark de oferta para o mature_cutoff somente após validação"
@@ -1739,7 +1740,7 @@ resources:
           depends_on:
             - task_key: commit_repair_oferta
           notebook_task:
-            notebook_path: ${workspace.file_path}/pipeline/silver/repair_fact_maturity_baseline.py
+            notebook_path: ${workspace.file_path}/ops/repair/repair_fact_maturity_baseline.py
             base_parameters:
               entity: pagarfornecedor
               repair_from: "2026-09-18"
@@ -1749,7 +1750,7 @@ resources:
           depends_on:
             - task_key: repair_pagarfornecedor
           notebook_task:
-            notebook_path: ${workspace.file_path}/pipeline/silver/validate_fact_maturity_repair.py
+            notebook_path: ${workspace.file_path}/ops/repair/validate_fact_maturity_repair.py
             base_parameters:
               entity: pagarfornecedor
               repair_from: "2026-09-18"
@@ -1759,7 +1760,7 @@ resources:
           depends_on:
             - task_key: validate_repair_pagarfornecedor
           notebook_task:
-            notebook_path: ${workspace.file_path}/pipeline/silver/commit_fact_maturity_repair.py
+            notebook_path: ${workspace.file_path}/ops/repair/commit_fact_maturity_repair.py
             base_parameters:
               entity: pagarfornecedor
           description: "Corrige watermark de pagarfornecedor para o mature_cutoff somente após validação"
@@ -1768,7 +1769,7 @@ resources:
           depends_on:
             - task_key: commit_repair_pagarfornecedor
           notebook_task:
-            notebook_path: ${workspace.file_path}/pipeline/silver/repair_fact_maturity_baseline.py
+            notebook_path: ${workspace.file_path}/ops/repair/repair_fact_maturity_baseline.py
             base_parameters:
               entity: pagarfornecedorparcela
               repair_from: "2026-09-18"
@@ -1778,7 +1779,7 @@ resources:
           depends_on:
             - task_key: repair_pagarfornecedorparcela
           notebook_task:
-            notebook_path: ${workspace.file_path}/pipeline/silver/validate_fact_maturity_repair.py
+            notebook_path: ${workspace.file_path}/ops/repair/validate_fact_maturity_repair.py
             base_parameters:
               entity: pagarfornecedorparcela
               repair_from: "2026-09-18"
@@ -1788,7 +1789,7 @@ resources:
           depends_on:
             - task_key: validate_repair_pagarfornecedorparcela
           notebook_task:
-            notebook_path: ${workspace.file_path}/pipeline/silver/commit_fact_maturity_repair.py
+            notebook_path: ${workspace.file_path}/ops/repair/commit_fact_maturity_repair.py
             base_parameters:
               entity: pagarfornecedorparcela
           description: "Corrige watermark de pagarfornecedorparcela para o mature_cutoff somente após validação"
@@ -1797,7 +1798,7 @@ resources:
           depends_on:
             - task_key: commit_repair_pagarfornecedorparcela
           notebook_task:
-            notebook_path: ${workspace.file_path}/pipeline/silver/repair_fact_maturity_baseline.py
+            notebook_path: ${workspace.file_path}/ops/repair/repair_fact_maturity_baseline.py
             base_parameters:
               entity: pagaroutrasdespesas
               repair_from: "2026-09-18"
@@ -1807,7 +1808,7 @@ resources:
           depends_on:
             - task_key: repair_pagaroutrasdespesas
           notebook_task:
-            notebook_path: ${workspace.file_path}/pipeline/silver/validate_fact_maturity_repair.py
+            notebook_path: ${workspace.file_path}/ops/repair/validate_fact_maturity_repair.py
             base_parameters:
               entity: pagaroutrasdespesas
               repair_from: "2026-09-18"
@@ -1817,7 +1818,7 @@ resources:
           depends_on:
             - task_key: validate_repair_pagaroutrasdespesas
           notebook_task:
-            notebook_path: ${workspace.file_path}/pipeline/silver/commit_fact_maturity_repair.py
+            notebook_path: ${workspace.file_path}/ops/repair/commit_fact_maturity_repair.py
             base_parameters:
               entity: pagaroutrasdespesas
           description: "Corrige watermark de pagaroutrasdespesas para o mature_cutoff somente após validação"
@@ -1826,7 +1827,7 @@ resources:
           depends_on:
             - task_key: commit_repair_pagaroutrasdespesas
           notebook_task:
-            notebook_path: ${workspace.file_path}/pipeline/silver/repair_fact_maturity_baseline.py
+            notebook_path: ${workspace.file_path}/ops/repair/repair_fact_maturity_baseline.py
             base_parameters:
               entity: pagaroutrasdespesasimposto
               repair_from: "2026-09-18"
@@ -1836,7 +1837,7 @@ resources:
           depends_on:
             - task_key: repair_pagaroutrasdespesasimposto
           notebook_task:
-            notebook_path: ${workspace.file_path}/pipeline/silver/validate_fact_maturity_repair.py
+            notebook_path: ${workspace.file_path}/ops/repair/validate_fact_maturity_repair.py
             base_parameters:
               entity: pagaroutrasdespesasimposto
               repair_from: "2026-09-18"
@@ -1846,7 +1847,7 @@ resources:
           depends_on:
             - task_key: validate_repair_pagaroutrasdespesasimposto
           notebook_task:
-            notebook_path: ${workspace.file_path}/pipeline/silver/commit_fact_maturity_repair.py
+            notebook_path: ${workspace.file_path}/ops/repair/commit_fact_maturity_repair.py
             base_parameters:
               entity: pagaroutrasdespesasimposto
           description: "Corrige watermark de pagaroutrasdespesasimposto para o mature_cutoff somente após validação"
@@ -1855,7 +1856,7 @@ resources:
           depends_on:
             - task_key: commit_repair_pagaroutrasdespesasimposto
           notebook_task:
-            notebook_path: ${workspace.file_path}/pipeline/silver/verify_fact_maturity_repair.py
+            notebook_path: ${workspace.file_path}/ops/repair/verify_fact_maturity_repair.py
           description: "Confirma 13/13 COMMITTED no mature_cutoff e zero linhas acima dele"
 
     sales_incremental_profile:
@@ -1887,28 +1888,28 @@ resources:
       tasks:
         - task_key: repair_sales_maturity
           notebook_task:
-            notebook_path: ${workspace.file_path}/pipeline/silver/repair_sales_maturity_baseline.py
+            notebook_path: ${workspace.file_path}/ops/repair/repair_sales_maturity_baseline.py
           description: "Restaura ids sobrescritos pela partição aberta para a última versão madura"
 
         - task_key: validate_sales_maturity_repair
           depends_on:
             - task_key: repair_sales_maturity
           notebook_task:
-            notebook_path: ${workspace.file_path}/pipeline/silver/validate_sales_maturity_repair.py
+            notebook_path: ${workspace.file_path}/ops/repair/validate_sales_maturity_repair.py
           description: "Exige equivalência exata entre Silver venda e full rebuild até mature_cutoff"
 
         - task_key: commit_sales_maturity_repair
           depends_on:
             - task_key: validate_sales_maturity_repair
           notebook_task:
-            notebook_path: ${workspace.file_path}/pipeline/silver/commit_sales_maturity_repair.py
+            notebook_path: ${workspace.file_path}/ops/repair/commit_sales_maturity_repair.py
           description: "Semeia/promove watermark de venda somente após validação"
 
         - task_key: verify_sales_maturity_repair
           depends_on:
             - task_key: commit_sales_maturity_repair
           notebook_task:
-            notebook_path: ${workspace.file_path}/pipeline/silver/verify_sales_maturity_repair.py
+            notebook_path: ${workspace.file_path}/ops/repair/verify_sales_maturity_repair.py
           description: "Confirma venda COMMITTED no mature_cutoff e zero open rows"
 
     sales_incremental_fixture:

@@ -1,5 +1,5 @@
 # Databricks notebook source
-# pipeline/silver/bootstrap_fact_partition_manifests.py
+# ops/seed/bootstrap_fact_partition_manifests.py
 # R2 explicit one-time bootstrap for already-committed fact partitions.
 #
 # Creates manifests from the current physical Bronze file state through each

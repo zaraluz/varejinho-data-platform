@@ -1,4 +1,5 @@
 # Databricks notebook source
+# ops/bootstrap/validate_environment.py
 # Valida o isolamento lógico do ambiente antes de liberar transformações destrutivas.
 # Em dev, a Bronze deve ser composta por views sobre a Bronze raw de prod,
 # enquanto Silver/Gold/Control pertencem exclusivamente ao catálogo dev.

@@ -1,4 +1,5 @@
 # Databricks notebook source
+# ops/seed/bootstrap_schema_drift_baselines.py
 # Gate S3A — bootstrap EXPLÍCITO dos baselines de Schema Drift ainda ausentes.
 #
 # Escopo:
@@ -43,7 +44,7 @@ def derive_bundle_files_path() -> str:
         ) from exc
 
     workspace_path = raw if raw.startswith("/Workspace/") else f"/Workspace{raw}"
-    marker = "/pipeline/silver/"
+    marker = "/ops/seed/"
     if marker not in workspace_path:
         raise Exception(
             f"Notebook S3A fora do layout esperado do bundle: {workspace_path}"

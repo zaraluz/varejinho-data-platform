@@ -1,5 +1,5 @@
 # Databricks notebook source
-# pipeline/silver/repair_sales_maturity_baseline.py
+# ops/repair/repair_sales_maturity_baseline.py
 # Gate D7B — one-time repair da Silver venda após provar maturidade D+1.
 #
 # O transform_sales legado já consumiu a partição aberta. Este repair:
