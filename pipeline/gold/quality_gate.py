@@ -308,6 +308,7 @@ contas_src = (
     )
     .select(
         F.col("pp.id").alias("id_parcela"),
+        F.col("pf.id_loja").alias("id_loja"),
         F.col("pf.id_fornecedor").alias("id_fornecedor"),
         F.col("pf.dataemissao").alias("dataemissao"),
     )
@@ -320,14 +321,22 @@ check_temporal_mapping(
 )
 
 silver_total = parcela.count()
-eligible_ids = contas_src.select("id_parcela").distinct()
-gold_ids = df.select("id_parcela").distinct()
+eligible_keys = contas_src.select("id_parcela", "id_loja").distinct()
+gold_keys = df.select("id_parcela", "id_loja").distinct()
 
-eligible = eligible_ids.count()
-gold = gold_ids.count()
+eligible = eligible_keys.count()
+gold = gold_keys.count()
 orphans = silver_total - eligible
-missing_gold = eligible_ids.join(gold_ids, on="id_parcela", how="left_anti").count()
-extra_gold = gold_ids.join(eligible_ids, on="id_parcela", how="left_anti").count()
+missing_gold = eligible_keys.join(
+    gold_keys,
+    on=["id_parcela", "id_loja"],
+    how="left_anti",
+).count()
+extra_gold = gold_keys.join(
+    eligible_keys,
+    on=["id_parcela", "id_loja"],
+    how="left_anti",
+).count()
 
 check(
     "fato_contas_pagar — reconciliação elegível exata",
@@ -340,10 +349,16 @@ check(
 )
 
 if orphans:
-    orphan_rows = parcela.join(
-        pagarfornecedor.select(F.col("id").alias("_silver_parent_id")),
-        F.col("pp.id_pagarfornecedor") == F.col("_silver_parent_id"),
-        "left_anti",
+    orphan_rows = (
+        parcela.join(
+            pagarfornecedor.select(F.col("id").alias("_silver_parent_id")),
+            F.col("pp.id_pagarfornecedor") == F.col("_silver_parent_id"),
+            "left_anti",
+        )
+        .select(
+            F.col("pp.id").alias("id_parcela"),
+            F.col("pp.id_pagarfornecedor").alias("id_pagarfornecedor"),
+        )
     )
     bronze_parent_ids = (
         spark.table(f"{BRONZE_SOURCE_CATALOG}.bronze.pagarfornecedor")
@@ -354,10 +369,10 @@ if orphans:
     orphan_parent_present_bronze = (
         orphan_rows.join(
             bronze_parent_ids,
-            F.col("pp.id_pagarfornecedor") == F.col("_bronze_parent_id"),
+            F.col("id_pagarfornecedor") == F.col("_bronze_parent_id"),
             "inner",
         )
-        .select(F.col("pp.id_pagarfornecedor"))
+        .select(F.col("id_pagarfornecedor"))
         .distinct()
         .count()
     )
