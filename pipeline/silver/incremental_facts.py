@@ -69,6 +69,25 @@ DRIFT = SilverSchemaDriftRuntime(
     bundle_files_path=BUNDLE_FILES_PATH,
 )
 
+PARTITION_RUNTIME_PATH = f"{BUNDLE_FILES_PATH}/quality/partition_manifest_runtime.py"
+_partition_spec = importlib.util.spec_from_file_location(
+    "varejinho_partition_manifest_runtime_facts", PARTITION_RUNTIME_PATH
+)
+if _partition_spec is None or _partition_spec.loader is None:
+    raise ImportError(
+        f"Não foi possível carregar partition manifest runtime: {PARTITION_RUNTIME_PATH}"
+    )
+_partition_module = importlib.util.module_from_spec(_partition_spec)
+_partition_spec.loader.exec_module(_partition_module)
+FactPartitionManifestRuntime = _partition_module.FactPartitionManifestRuntime
+MUTATION_GUARD = FactPartitionManifestRuntime(
+    spark=spark,
+    dbutils=dbutils,
+    control_root=CONTROL_ROOT,
+    bundle_files_path=BUNDLE_FILES_PATH,
+    bronze_source_catalog=BRONZE_SOURCE_CATALOG,
+)
+
 CONFIG = {
     "notaentrada": {"chave": ["numeronota", "id_loja", "id_fornecedor"], "data": "dataentrada", "decimais": ["valortotal", "valormercadoria", "valordesconto"]},
     "notaentradaitem": {"chave": ["id"], "data": None, "decimais": ["quantidade", "valor", "valortotal"]},
@@ -188,6 +207,16 @@ def processar(entity):
     committed = state["last_processed_snapshot"]
     candidate = state["candidate_snapshot"]
     status = state["status"]
+
+    manifest_report = MUTATION_GUARD.assert_committed(
+        entity,
+        committed,
+        bronze_override=BRONZE_OVERRIDE,
+    )
+    print(
+        f"[MUTATION_GUARD] {entity}: committed history verified "
+        f"| partitions={manifest_report.get('manifest_rows', 0)}"
+    )
 
     if status == "PENDING_VALIDATION" and candidate is not None:
         print(
