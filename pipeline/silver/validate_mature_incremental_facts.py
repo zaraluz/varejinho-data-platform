@@ -45,6 +45,7 @@ CATALOG = job_param("catalog", "varejinho_dev")
 ENTITY = job_param("entity", "all")
 BUNDLE_FILES_PATH = job_param("bundle_files_path", derive_bundle_files_path())
 CONTROL_ROOT = job_param("control_root", "s3://varejinho-lake/_control/dev")
+BRONZE_SOURCE_CATALOG = job_param("bronze_source_catalog", "varejinho")
 CONTROL_TABLE = job_param("control_table", f"{CATALOG}.control.fact_watermark")
 BRONZE_OVERRIDE = job_param("bronze_table", "")
 SILVER_OVERRIDE = job_param("silver_table", "")
@@ -82,6 +83,26 @@ DRIFT = SilverSchemaDriftRuntime(
     dbutils=dbutils,
     control_root=CONTROL_ROOT,
     bundle_files_path=BUNDLE_FILES_PATH,
+)
+
+PARTITION_RUNTIME_PATH = f"{BUNDLE_FILES_PATH}/quality/partition_manifest_runtime.py"
+_partition_spec = importlib.util.spec_from_file_location(
+    "varejinho_partition_manifest_runtime_validate_mature",
+    PARTITION_RUNTIME_PATH,
+)
+if _partition_spec is None or _partition_spec.loader is None:
+    raise ImportError(
+        f"Não foi possível carregar partition manifest runtime: {PARTITION_RUNTIME_PATH}"
+    )
+_partition_module = importlib.util.module_from_spec(_partition_spec)
+_partition_spec.loader.exec_module(_partition_module)
+FactPartitionManifestRuntime = _partition_module.FactPartitionManifestRuntime
+MUTATION_GUARD = FactPartitionManifestRuntime(
+    spark=spark,
+    dbutils=dbutils,
+    control_root=CONTROL_ROOT,
+    bundle_files_path=BUNDLE_FILES_PATH,
+    bronze_source_catalog=BRONZE_SOURCE_CATALOG,
 )
 
 CONFIG = {
@@ -284,6 +305,18 @@ def validar(entity):
             f"{entity}: lote maduro divergiu ou Silver contém dados acima "
             f"do candidate={candidate}"
         )
+
+    manifest_stage = MUTATION_GUARD.stage(
+        entity,
+        committed,
+        candidate,
+        bronze_override=BRONZE_OVERRIDE,
+    )
+    print(
+        f"[MUTATION_GUARD] {entity}: validated manifest staged "
+        f"| rows={manifest_stage['staged_rows']} "
+        f"| reused={manifest_stage['reused']}"
+    )
 
 
 entities = list(CONFIG) if ENTITY == "all" else [ENTITY]
