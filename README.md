@@ -1,29 +1,44 @@
 # Varejinho Data Platform
 
-A retail data platform reconstruction built on Databricks, PySpark, Delta Lake, Unity Catalog, AWS S3, Lakeflow Jobs and dbt.
+**A retail lakehouse rebuilt on Databricks with production-grade guarantees:** incremental Silver processing that never reads an unfinished day, real SCD Type 2 history, point-in-time Gold facts, executable data contracts, controlled schema evolution and a release process where every claim is backed by a reproducible test.
 
-This repository documents the migration of a legacy data warehouse workflow into a governed, incremental and testable lakehouse-style platform. The focus is not only on moving data through Bronze, Silver and Gold, but on proving that each layer behaves correctly under mutable daily files, historical dimensions, temporal joins, data contracts and environment isolation.
+> **TL;DR**
+> I built the first data platform of a Brazilian supermarket group (two stores and a distribution center) as its only data professional: ERP → Pentaho → CSV on S3 → Athena → Power BI. Operating it showed me where it broke: records lost at month boundaries, full reprocessing on every load, no history for master data and no quality gates. This repository is the rebuild. The hardest problem turned out to be time: knowing when a day of source data is actually complete, and making facts join the version of a product or supplier that was true *on the day the event happened*.
 
-> **Current status:** the core Silver incremental architecture, SCD2 dimensions, Gold temporal joins, Data Contracts, Schema Drift and dbt validation/documentation layer are validated in `dev`. **The Release Gate is now the active block.**
+**Status:** release candidate. Fully validated in the `dev` target (final run `707938728538043`: Silver QG 113/113, Gold QG 52/52, dbt 44 pass / 2 intentional warnings / 0 errors). Production cutover follows the merge to `main`.
+
+**Stack:** Databricks (Unity Catalog, Delta Lake, serverless Lakeflow Jobs, Declarative Automation Bundles) · PySpark · Spark SQL · dbt · AWS S3 · Pentaho Data Integration · PostgreSQL (source ERP)
 
 ---
 
-## Why this project exists
+## Contents
 
-The reconstruction started from a working retail analytics environment, but the engineering guarantees around it were incomplete. The hardening effort turns implicit behavior into explicit platform rules:
+1. [Where this started](#where-this-started)
+2. [Architecture](#architecture)
+3. [How a daily run flows](#how-a-daily-run-flows)
+4. [Guarantees and how each one is proven](#guarantees-and-how-each-one-is-proven)
+5. [What I found along the way](#what-i-found-along-the-way)
+6. [Gold model](#gold-model)
+7. [Evidence and measurements](#evidence-and-measurements)
+8. [Repository map](#repository-map)
+9. [Running it](#running-it)
+10. [Governance and scope](#governance-and-scope)
+11. [Known limitations and roadmap](#known-limitations-and-roadmap)
 
-- separate `dev` and `prod` execution paths;
-- process only mature daily partitions instead of assuming a folder is complete because it exists;
-- maintain state with watermarks and controlled `APPLY -> VALIDATE -> COMMIT` transitions;
-- preserve historical dimension versions with SCD Type 2;
-- resolve fact-to-dimension relationships using the business event date, not only the current dimension row;
-- make YAML data contracts executable instead of leaving validation logic duplicated inside notebooks;
-- fail closed on structural problems, quarantine recoverable bad rows, and keep warnings non-blocking;
-- prove changes with fixtures and quality gates before promoting them into the daily DAG.
+---
 
-A guiding rule throughout the reconstruction is:
+## Where this started
 
-> **Measure first. Prove the failure mode. Change second.**
+The first version worked and delivered dashboards, but it had no engineering guarantees. Running it day to day, I identified the failure modes that shaped this rebuild:
+
+| Legacy behavior | Consequence | Replaced by |
+|---|---|---|
+| Extraction filtered by `date_trunc('month', CURRENT_DATE)` | Records from the last day of the month could be lost when the month turned; backfills were manual | Raw data partitioned by `ingestion_date`; Silver advances by watermark |
+| Every load re-read and rewrote the whole month | Wasted compute; no notion of what was already processed | Incremental `APPLY → VALIDATE → COMMIT` per entity |
+| Columns and joins chosen inside the ETL tool | Every new analysis meant changing extraction | Pentaho reduced to a plain extractor (`SELECT *`, no joins, no renames) |
+| CSV as the analytical format | Every query scanned everything | Delta Lake with partitioning in Silver/Gold |
+| Master data overwritten in place | No way to know what a product or supplier looked like in the past | SCD Type 2 with evidence-based validity dates |
+| No contracts or gates | Errors propagated straight to dashboards | Contracts, schema drift control, quality gates at every layer, dbt tests |
 
 ---
 
@@ -31,330 +46,234 @@ A guiding rule throughout the reconstruction is:
 
 ```mermaid
 flowchart LR
-    A[ERP / daily source files] --> B[AWS S3 raw]
-    B --> C[Bronze\nraw registration + source quality]
-    C --> D[Silver\nincremental facts + SCD2 dimensions]
-    D --> E[Gold\ndimensional model + temporal joins]
-    E --> F[Analytics consumers]
+    subgraph SRC["Source · on-premise"]
+        ERP[("ERP<br/>PostgreSQL")]
+        PDI["Pentaho<br/>plain extractor<br/>facts 06h · 14h · 22h<br/>dimensions 02h · domains 01h"]
+        ERP --> PDI
+    end
 
-    D --> Q[Contract engine\nFAIL / QUARANTINE / WARNING]
-    Q --> D
+    subgraph AWS["AWS S3"]
+        RAW["raw CSV<br/>ingestion_date=YYYY-MM-DD/"]
+        CTL["control storage<br/>schema baselines<br/>partition manifests"]
+    end
 
-    W[Watermarks + control state] --> D
-    U[Unity Catalog] --- C
-    U --- D
-    U --- E
-    J[Lakeflow Jobs + Databricks Asset Bundles] --- C
-    J --- D
-    J --- E
+    subgraph DBX["Databricks · Unity Catalog"]
+        BR["Bronze<br/>37 external tables<br/>(raw, read-only)"]
+        SI["Silver · Delta<br/>14 incremental facts<br/>3 SCD2 dimensions<br/>20 reference entities"]
+        GO["Gold · Delta<br/>star schema<br/>5 dimensions · 9 facts<br/>point-in-time joins"]
+        DBT["dbt tests<br/>46 tests on 14 Gold sources"]
+        BR --> SI --> GO --> DBT
+    end
+
+    subgraph CP["Control plane (quality/)"]
+        C1["data contracts<br/>fail · quarantine · warn"]
+        C2["schema drift<br/>detect ≠ promote"]
+        C3["watermarks +<br/>D+1 maturity"]
+        C4["mutation guard<br/>committed partitions<br/>are immutable"]
+    end
+
+    PDI --> RAW --> BR
+    CP -.enforces.-> SI
+    CTL <-.-> CP
+    GO --> BI["Power BI<br/>(reconnection after<br/>ERP × Gold reconciliation)"]
 ```
 
-### Environment model
+**Layer responsibilities.** Bronze preserves the raw source exactly and exposes file metadata. Silver turns it into a trustworthy interface: types, grain, deduplication, contracts, quarantine and history. Gold serves analytics: a star schema whose facts carry the dimension version valid at the business date of each event.
 
-- `varejinho_dev` is the isolated hardening catalog.
-- `varejinho` is the production catalog.
-- Bronze raw data is shared read-only where appropriate, while Silver/Gold writes remain isolated by target.
-- Production schedules remain paused during hardening and are only eligible for promotion after the Release Gate.
+**Environments.** `dev` and `prod` are separate Unity Catalog catalogs deployed from the same bundle. Dev reads the shared raw Bronze through read-only views (Unity Catalog does not allow two external tables on the same path) and writes only its own Silver, Gold and control state. Production jobs run as a service principal.
 
 ---
 
-## Medallion layers
+## How a daily run flows
 
-### Bronze
+One run per day at 03:00 (America/Fortaleza), after the source has closed the previous day. Every stage is a blocking dependency: nothing downstream runs on top of a failed check.
 
-Bronze keeps source data close to its raw shape and exposes the file metadata required by downstream maturity rules.
+```mermaid
+flowchart TB
+    BQ["Bronze quality gate"]
 
-The key lesson from the retail ingestion pattern is that a date-partitioned folder can exist while the source is still writing files into it. For the incremental fact pipeline, a partition is considered mature only after the file modification evidence shows that the partition is no longer open.
+    subgraph S["Silver"]
+        direction TB
+        REF["Reference dimensions<br/>19 SCD1 domains + ABC-curve snapshot<br/>schema drift preflight for all before any write"]
+        SCD["SCD2 · produto → fornecedor → mercadologico<br/>APPLY → VALIDATE → COMMIT, serialized"]
+        FACTS["venda + 13 facts<br/>each: APPLY → VALIDATE → COMMIT<br/>only mature D+1 partitions · serialized on one control table"]
+    end
 
-Conceptually:
+    SQG["Silver quality gate · 113 checks<br/>maturity alignment · timeliness · contracts<br/>SCD2 invariants · quarantine · partition immutability"]
+    GD["Gold dimensions<br/>one row per SCD2 version"]
+    GF["Gold facts<br/>point-in-time joins"]
+    GQG["Gold quality gate · 52 checks<br/>temporal surrogate keys · reconciliation"]
+    DT["dbt test · 46 tests<br/>on the Gold built by this same run"]
 
-```text
-partition D is mature when its files were last modified after D
+    BQ --> REF & SCD & FACTS
+    REF & SCD & FACTS --> SQG --> GD --> GF --> GQG --> DT
 ```
 
-This prevents rows from an open daily partition from being promoted into Silver too early.
-
-### Silver
-
-Silver contains two different state models.
-
-**Current-state transactional facts** use an incremental D+1 process with a shared watermark pattern:
-
-```text
-APPLY -> VALIDATE -> COMMIT
-```
-
-The daily pipeline currently handles `venda` plus 13 additional transactional/financial facts. A successful commit requires the mature candidate to pass validation before the watermark advances.
-
-The implementation preserves:
-
-- inserts;
-- updates;
-- no-delete semantics when a key is absent from a later snapshot;
-- row-level quarantine;
-- replay/idempotency;
-- open-partition blocking;
-- post-commit mutation detection for already accepted daily partitions.
-
-Each committed fact partition now has an auditable physical manifest derived from the source file set (`_metadata.file_path` + `_metadata.file_modification_time`). The runtime verifies committed history before APPLY, stages the candidate fingerprint after VALIDATE, rechecks it before COMMIT, and only then advances the watermark. A later mutation of an already committed partition therefore fails closed instead of silently escaping the forward-only watermark.
-
-**Historical dimensions** use real SCD Type 2 behavior for:
-
-- `produto`;
-- `fornecedor`;
-- `mercadologico`.
-
-Where reliable business timestamps exist, they are used to define temporal boundaries. Where the source cannot provide historical change timestamps, the platform falls back to the first observed ingestion snapshot instead of inventing history.
-
-### Gold
-
-Gold materializes the analytical dimensional model: 5 dimensions and 9 fact tables.
-
-A critical hardening step was replacing current-row joins with temporal joins where a fact must resolve the dimension version that was valid when the business event happened.
-
-The temporal predicate is:
-
-```sql
-event_ts >= valid_from
-AND (valid_to IS NULL OR event_ts < valid_to)
-```
-
-Examples now validated in the platform:
-
-- purchases -> product by `datacompra`;
-- purchases -> supplier by `datacompra`;
-- promotions -> product by `datainicio`;
-- accounts payable -> supplier by `dataemissao`;
-- other expenses -> supplier by `dataemissao`.
-
-If an event predates the first modeled dimension boundary, the fact is preserved with a null surrogate key. The pipeline does **not** silently fall back to the current or earliest-known dimension version.
+The watermark of an entity only moves in its `COMMIT` task, which only runs if `VALIDATE` passed. A failure in one fact leaves every other committed entity untouched and is retried surgically.
 
 ---
 
-## Data Contracts
+## Guarantees and how each one is proven
 
-Data Contracts were rebuilt from static YAML documentation into an executable Silver control layer.
+Each guarantee has a mechanism in the runtime and an isolated fixture that proves it. Fixtures run the real runtime notebooks against synthetic or sandboxed data, so the proof covers the code that ships.
 
-The contract policy classifies all 37 Silver entities into three tiers:
+| Guarantee | Mechanism | Proven by |
+|---|---|---|
+| Never read a day that is still being written | D+1 maturity from physical file metadata: day `D` is processed only when its files were last modified after `D` | D6A (open partition stays out), D7C 11/11 |
+| A watermark only moves after validation | `APPLY → VALIDATE → COMMIT` as separate DAG tasks | D4 9/9 (update, insert, no-delete, quarantine, watermark) |
+| Already-committed history cannot change silently | Per-partition manifest fingerprinting `_metadata.file_path` + modification time, checked at apply, commit and in the Silver gate | R2 7/7 |
+| Master-data history is real and replay-safe | One incremental SCD2 engine; Type 1 vs Type 2 decided per attribute from profiled real changes | B7E 17/17, replay idempotency, generic-engine regression vs. full backfill, R3 11/11 |
+| Facts use the version valid when the event happened | Point-in-time joins on each fact's business date | Gold QG: stored surrogate key = expected temporal key for every audited relation |
+| The Silver interface is enforced, not documented | One contract engine: structural breaks fail closed, bad rows go to quarantine, warnings never block | C3 7/7 |
+| A schema change is a decision, not a side effect | Drift is detected and classified; baselines change only through explicit promotion | S2 6/6, 37/37 baselines audited exact vs. Silver |
+| The pipeline cannot stall silently | Timeliness check: committed watermark at most 2 days behind the business date | Silver QG (14 checks) |
+| Gold is correct and consistent | Gold quality gate + dbt source tests | Gold QG 52/52, dbt 44 pass / 2 warn / 0 error |
 
-| Tier | Entities | Policy |
-|---|---:|---|
-| `critical` | 9 | Full executable contract |
-| `high` | 11 | Core executable contract |
-| `standard` | 17 | Simplified structural availability gate |
+The two dbt warnings are intentional business monitors (offer anomalies), not technical failures.
 
-The 20 `critical/high` contracts are environment-independent and use logical references such as `produto.id` instead of hardcoded catalog paths.
+---
 
-The central engine validates:
+## What I found along the way
 
-- required columns;
-- exact Spark types;
-- nullability;
-- grain / uniqueness;
-- min / max / accepted values;
-- referential integrity;
-- freshness;
-- severity.
+The most valuable part of this project was not the code, but what measuring the source revealed. Three examples:
 
-### Contract actions
+### 1. A daily folder is not a finished day
 
-| Condition | Action |
+The first incremental run for purchase-invoice items disagreed with a full rebuild: 502 keys in Silver no longer existed anywhere in the raw layer, and one key had appeared inside a day already processed, while every shared key matched value for value. The transformation was not the problem; the input was moving. Reading `_metadata.file_modification_time` showed that the extractor rewrites the current day's file several times until the next day, and profiling all fact tables showed no file ever modified after D+1.
+
+That became the **D+1 maturity rule**, a narrow repair of only the contaminated partitions (instead of a blind full rebuild) and, later, a **mutation guard** that blocks the pipeline if an already-committed partition ever changes.
+
+### 2. A table that looked like SCD2 but kept no history
+
+The original dimensions had `valid_from`, `valid_to` and `is_current`, but each load dropped the table and rebuilt it from the latest snapshot. It looked like history and preserved none. The rebuild started from evidence: profiling which product attributes really change (for example, full descriptions and category) before deciding what deserves a new version. For suppliers, only identity-bearing attributes (tax ID and legal name) create versions; the operational attributes that actually changed are Type 1, and sensitive supplier fields were excluded from Silver entirely. The incremental engine is proven equal to an independent full backfill.
+
+### 3. A rule that worked by timezone coincidence
+
+The maturity rule compares dates in UTC. It holds today because the extractor's last daily load runs at 22:00 local time, which is 01:00 UTC of the next day (verified across five consecutive days). If that load ever moved earlier, no partition would ever mature, the watermark and the maturity boundary would stall together, and every existing check would stay green while nothing was processed. The fix was not to touch a proven rule before release, but to add the missing **timeliness** dimension to the Silver gate and to record the coupling. The long-term fix, a `_SUCCESS` marker written by the extractor, is planned together with moving extraction to one daily load.
+
+---
+
+## Gold model
+
+Star schema built by PySpark/Spark SQL; dbt tests and documents it as external sources.
+
+**Dimensions:** `dim_produto`, `dim_fornecedor`, `dim_mercadologico` (one row per SCD2 version, surrogate key = hash of id + `valid_from`), `dim_loja`, `dim_tempo` (one row per day).
+
+| Fact | Grain | Point-in-time join | Partitioning |
+|---|---|---|---|
+| `fato_vendas` | one row per item sold per transaction | product by `data` | `ano`, `mes` |
+| `fato_compras` | one row per purchase-order item | product and supplier by `datacompra` | `ano`, `mes` |
+| `fato_perdas` | one row per loss record | product by `data` | `ano`, `mes` |
+| `fato_movimento_estoque` | one row per stock movement | product by `datamovimento` | `ano`, `mes` |
+| `fato_promocoes` | one row per product in a promotion | product by `datainicio` | `ano`, `mes` |
+| `fato_oferta` | one row per product on offer per store | product by `datainicio` | `ano`, `mes` |
+| `fato_contas_pagar` | one row per supplier-payment installment | supplier by `dataemissao` | `ano`, `mes` |
+| `fato_outras_despesas` | one row per operating expense | supplier by `dataemissao` | `ano`, `mes` |
+| `fato_curva_abc` | one row per product, store and snapshot date | product by `snapshot_date` | `snapshot_date` |
+
+Events dated before the first known version of a dimension keep a null surrogate key instead of silently falling back to the current version: joining on `is_current` would quietly rewrite the past.
+
+---
+
+## Evidence and measurements
+
+### Final validation run (dev, 2026-09-23)
+
+| Check | Result |
 |---|---|
-| Missing contract, missing column, invalid YAML, incompatible type | **FAIL CLOSED** |
-| Recoverable row-level `error` | **QUARANTINE** |
-| `warning` rule | **LOG / CONTINUE** |
+| `pipeline_diario` run `707938728538043` | SUCCESS · 58 tasks |
+| Silver quality gate | 113 / 113 |
+| Gold quality gate | 52 / 52 |
+| dbt | 44 pass · 2 warn (intentional) · 0 error · 46 tests |
+| Regression fixtures | D4 9/9 · D7C 11/11 · R2 7/7 · R3 11/11 |
 
-For snapshot-based facts, uniqueness is scoped by `ingestion_date`: the same business key may legitimately appear in different snapshots, but duplicate occurrences inside the same snapshot are rejected.
+### Data scanned per question
 
-The same central contract runtime is used by both `APPLY` and pre-commit `VALIDATE`, avoiding two competing interpretations of the YAML.
+The legacy baseline was measured on Athena over the CSV extracts. The same raw CSV is also read by Databricks as Bronze, so the Bronze and Gold columns compare **formats on the same engine**. Bytes scanned is the metric that matters here: it is what Athena bills and what drives latency as data grows.
 
----
+| Question | Legacy: CSV on Athena | Bronze CSV on Databricks | Gold Delta on Databricks |
+|---|---|---|---|
+| Sales by store for one month | 269.59 MB (full scan) | full scan | **496 KB** (partition pruning, over 500× less) |
+| Count all sales | 269.59 MB (full scan) | 588 MB (full scan) | **0 B** (answered from Delta log statistics) |
+| Sales of one product | 269.59 MB (full scan) | full scan | 33 MB (no effective file skipping, see limitations) |
 
-## Schema Drift
+Absolute CSV sizes differ because Bronze has accumulated more daily partitions since the legacy baseline; the structural point is that CSV reads everything for every question.
 
-Schema Drift is enforced through one canonical control plane:
+### Where the run time goes
 
-- `quality/schema_drift_engine.py` owns comparison, classification, event persistence and explicit promotion;
-- `quality/schema_drift_runtime.py` is the Silver runtime adapter;
-- runtime never bootstraps a missing baseline automatically;
-- additive drift is logged but projected back to the accepted baseline until explicit promotion;
-- removed columns, type changes and mixed breaking drift persist an event and **BLOCK** the run;
-- baseline promotion is a separate, auditable operation.
-
-Coverage is complete across all 37 Silver entities:
-
-- 14 incremental facts;
-- 19 reference dimensions;
-- `curvaabc`;
-- 3 SCD2 dimensions.
-
-Reference dimensions use a full preflight before any write, avoiding partial Silver updates. SCD2 drift is evaluated on the **Silver-shaped output interface**, so upstream Bronze columns that are intentionally not materialized do not create false additive drift.
-
-Validation evidence:
-
-- isolated Schema Drift fixture: `6/6`;
-- fact regressions: D4 `9/9` and D7C `11/11`;
-- reference/snapshot preflight: `20/20` with `no_drift / ALLOW`;
-- SCD2: product, supplier and merchandising all `no_drift / ALLOW`;
-- final read-only registry audit: `37/37` baselines exact vs committed Silver, `37/37` physical column order aligned, `0` invalid baselines and `0` actionable findings;
-- final daily E2E after the D+1 mutation guard: Silver QG `99/99`, Gold QG `52/52`.
+Two runs were profiled task by task (about 40 minutes each). Typical tasks take 5 to 30 seconds; a few tasks per run wait about 300 or 600 seconds regardless of data volume (the same watermark commit took 5 s in one run and 606 s in the other), and different tasks stall in each run. Roughly 25 minutes of the critical path is serverless platform wait on Databricks Free Edition, not processing. Optimization was therefore deferred until it can be measured against that noise: measure first, then change.
 
 ---
 
-## Validation evidence
-
-The project is built around explicit gates rather than "it ran without an exception".
-
-### Latest end-to-end dev run
-
-- **Silver Quality Gate:** `99/99` checks passed, including 14 committed-partition mutation checks.
-- **Gold Quality Gate:** `52/52` checks passed, including exact eligible-grain reconciliation for supplier payables.
-- **dbt Gold validation:** `46` data tests across `14` Gold sources -> **44 PASS / 2 WARN / 0 ERROR / 0 SKIP**; warnings are intentional business-anomaly monitors.
-- **D+1 mutation guard:** explicit manifests bootstrapped and verified for all `14/14` incremental facts; isolated fixture `7/7`; D4 `9/9`; D7C `11/11`.
-- **Accounts payable reconciliation:** `840` Silver installments reference `653` headers absent from Bronze; the eligible Silver fact grain reconciles exactly to Gold with `0` missing and `0` extra rows.
-- All 14 incremental facts committed through the latest mature partition in that run.
-- All 20 executable contracts were structurally compatible with the materialized Silver schema.
-- All 17 standard entities passed the simplified availability gate.
-- Gold temporal joins remained consistent after the Silver/Data Contracts/Schema Drift changes.
-- **Schema Drift final registry audit:** `37/37` baselines found, `37/37` exact vs Silver, `37/37` physical column order aligned, `0` invalid baselines and `0` actionable findings.
-
-Latest validated dev volumes include:
-
-| Gold fact | Rows |
-|---|---:|
-| Sales | 4,380,703 |
-| Stock movements | 22,012,923 |
-| Purchases | 246,349 |
-| Promotions | 336,395 |
-| Losses | 84,225 |
-| Offers | 78,103 |
-| Accounts payable | 75,913 |
-| Other expenses | 19,457 |
-| ABC curve snapshots | 290,344 |
-
-These numbers are validation evidence from the current dev state, not fixed business totals.
-
----
-
-## Hardening journey
-
-The repository intentionally keeps the evolution visible. The current architecture was reached through a sequence of measured gates rather than a rewrite in one step.
-
-| Stage | Result |
-|---|---|
-| Environment isolation | `dev` and `prod` targets separated; dev writes isolated |
-| Bronze registration and source checks | Raw layer registered and usable by downstream gates |
-| Silver reference layer | Reference entities materialized for downstream joins |
-| Product SCD2 | Real Type 1 / Type 2 behavior, incremental updates and replay proven |
-| Supplier SCD2 | Business semantics profiled, incremental engine and replay proven |
-| Merchandising SCD2 | First-observed temporal history implemented where source timestamps do not exist |
-| Incremental facts | `venda + 13` facts moved to mature-partition processing with watermark control |
-| D+1 maturity | Open partitions blocked using file metadata evidence |
-| Post-commit mutation guard | Physical manifests for `14/14` facts; validate/commit recheck; E2E Silver QG `99/99` |
-| Gold temporal model | Historical facts resolve the dimension version valid at the event date |
-| Data Contracts | Central engine, canonical YAMLs, fixtures, runtime integration and E2E validation |
-| Schema Drift | Canonical engine/runtime across all `37/37` Silver entities; explicit promotion; final registry audit passed |
-| dbt cleanup / ownership | External Gold sources, native Databricks dbt task and read-only tests/docs validated in dev |
-| Release Gate | Final diff review, prod-safe deployment and controlled smoke test |
-
----
-
-## Current roadmap
-
-### 1. Release Gate — active
-
-Core hardening through dbt and the D+1 post-commit mutation guard is closed. The active Release Gate sub-block is the SCD2 reappearance policy, followed by:
-
-- review the full `feature/platform-hardening` -> `main` diff;
-- remove or archive temporary hardening artifacts that should not ship;
-- validate dev and prod bundle targets;
-- keep prod schedules paused on first deployment;
-- merge through PR;
-- deploy prod manually;
-- run controlled Silver/Gold smoke tests;
-- unpause schedules only after validation.
-
-Later work includes ERP-to-Gold reconciliation, deeper observability/SLOs, governance evidence, performance benchmarking and downstream BI integration.
-
----
-
-## Orchestration
-
-The Databricks Asset Bundle is the canonical deployment definition.
-
-The daily DAG follows the same safety ordering used throughout the project:
+## Repository map
 
 ```text
-Bronze Quality
-    -> SCD2 APPLY / VALIDATE / COMMIT
-    -> incremental facts APPLY / VALIDATE / COMMIT
-    -> Silver Quality Gate
-    -> Gold dimensions
-    -> Gold facts
-    -> Gold Quality Gate
+pipeline/        What production runs
+├── databricks.yml     bundle identity, variables, targets, sync
+├── resources/         production jobs (pipeline_diario, manutencao_semanal, dbt_tests)
+│   └── dev/           ops and validation jobs, declared only under targets.dev
+├── bronze/  silver/  gold/     runtime notebooks and Gold SQL
+quality/         Control plane: contract engine, schema drift engine, partition manifests
+contracts/       Silver data contracts (YAML) and tier policy
+dbt/             Read-only tests and documentation over Gold sources
+ops/             One-off, dev-guarded operations: bootstrap, SCD2 backfill (DR path), seeding, repairs, grants
+validation/      The evidence: fixtures, replays, profilers and diagnostics, grouped by block
+docs/            Decision log and architecture notes
 ```
 
-The quality gates are blocking dependencies: Gold is not rebuilt when Silver fails validation.
+Naming convention inside `validation/`: `profile_` and `diagnose_` only read; `prepare_` builds a sandbox; `verify_` checks the result and cleans up; `fixture_` does all three.
+
+- [Decision log](docs/decision_log.md): every architectural and operational decision with its reasoning and consequences
+- [Daily partition maturity](docs/architecture/daily_partition_maturity.md)
+- [dbt layer](dbt/README.md)
+- [Production service principal grants](ops/bootstrap/grant_prod_service_principal.sql)
 
 ---
 
-## Repository structure
+## Running it
 
-```text
-.
-├── contracts/          # Silver YAML contracts and contract fixtures
-├── dbt/                # read-only Gold tests/documentation/lineage layer
-├── docs/               # project documentation / decision records
-├── pipeline/
-│   ├── bootstrap/      # environment bootstrap and isolation validation
-│   ├── bronze/         # raw registration and Bronze quality
-│   ├── silver/         # SCD2, incremental facts, fixtures and Silver QG
-│   ├── gold/           # dimensions, facts, temporal profiling and Gold QG
-│   └── databricks.yml  # Databricks Asset Bundle / Lakeflow Jobs definition
-└── quality/            # canonical Data Contracts + Schema Drift engines/runtime adapters
-```
-
----
-
-## Running the dev target
-
-Prerequisites:
-
-- Databricks CLI authenticated to the target workspace;
-- access to the configured Unity Catalog and source storage;
-- permissions required by the bundle resources.
-
-From the repository:
+The platform depends on a private source, so it is not reproducible end to end outside the company. The deployment itself is standard:
 
 ```bash
 cd pipeline
 
-databricks bundle validate --target dev
-databricks bundle deploy --target dev
-databricks bundle run pipeline_diario --target dev
+# values kept out of Git
+# .databricks/bundle/<target>/variable-overrides.json  ->  {"alert_email": "..."}
+
+databricks bundle validate -t dev
+databricks bundle deploy   -t dev
+databricks bundle run pipeline_diario -t dev
+
+# any proof, for example the incremental facts fixture
+databricks bundle run facts_incremental_fixture -t dev
 ```
 
-During hardening, use `--target dev` explicitly. Production schedules are intentionally kept paused until the Release Gate.
+Runtime notebooks have no environment defaults: `catalog`, `bundle_files_path`, `control_root` and `bronze_source_catalog` come only from the target, and a missing value fails the task immediately.
 
 ---
 
-## Engineering principles behind the project
+## Governance and scope
 
-This reconstruction is intentionally opinionated about data reliability:
-
-1. **A successful notebook is not the same as correct data.**
-2. **Folder existence is not proof that a daily partition is complete.**
-3. **A watermark only advances after validation.**
-4. **Historical facts should not silently inherit today's dimension attributes.**
-5. **A contract should be executable, not decorative YAML.**
-6. **Drift detection and schema approval are different decisions.**
-7. **Replay and fixtures are part of the architecture, not cleanup tools.**
-8. **Production promotion is a gate, not the next command after dev succeeds.**
+- **Production** is the release environment of this project on Databricks Free Edition. The company's operational reporting does not depend on it, and real data is used with the company's approval. Moving to a paid workspace is a change of `workspace.host` in the target.
+- **Least privilege.** Production jobs run as a service principal with versioned Unity Catalog grants: read-only Bronze; read, write and create on Silver, Gold and control; no admin rights. Bundle files live in a restricted folder, because whoever can edit the code a service principal runs effectively holds its privileges.
+- **Data minimization.** Supplier fields such as credentials, personal documents and phone numbers are excluded from Silver by an explicit allowlist.
+- **This repository contains code only.** No business data is committed; fixtures use synthetic identifiers. Code is published for portfolio review; all rights reserved.
 
 ---
 
-## Project status
+## Known limitations and roadmap
 
-This repository is an active reconstruction/hardening project. The core incremental Silver path, SCD2 modeling, Gold temporal semantics, Data Contracts, Schema Drift and dbt validation/documentation layer have been validated in the dev environment. The final Release Gate is now the active block.
+Stated plainly, because a platform is only as trustworthy as its documented edges.
 
-Built as a hands-on Data Engineering project around real retail pipeline constraints.
+- **Gold freshness is D-1 by design.** The source ERP is itself D+1; complete days are preferred over an incomplete current day.
+- **D+1 maturity depends on the extractor schedule and UTC.** Detected by the timeliness gate; to be replaced by a `_SUCCESS` completion marker when extraction moves to one daily load.
+- **Z-Order does not survive the daily Gold rebuild.** Gold facts are recreated with `CREATE OR REPLACE` and Z-Order is applied weekly, so file skipping on product filters is lost the next day. Next step: liquid clustering declared in the table DDL, benchmarked against the current layout.
+- **Serverless wait dominates run time** on Free Edition (see measurements).
+- **Source orphans.** Some supplier-payment installments reference headers absent from the source extract; they are reported by the Gold gate as a source limitation instead of being dropped silently or fabricated.
+- **Bronze quality gate covers the 10 critical fact tables**, not all 37 raw tables.
+- **No CI or unit tests yet.** Correctness is proven by in-workspace fixtures. `pyproject.toml` is prepared for a GitHub Actions pipeline with bundle validation, linting and PySpark unit tests over `quality/`.
+- **Accuracy against the ERP is the next proof.** Quality gates prove internal consistency; an independent ERP × Gold reconciliation comes before reconnecting Power BI.
+
+---
+
+Built by **Zara Louise**: data analyst who designed, operated and rebuilt this platform end to end.
