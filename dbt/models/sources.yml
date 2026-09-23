@@ -4,9 +4,10 @@ sources:
   - name: gold
     schema: gold
     description: "Gold Star Schema materialized by the Databricks PySpark/SQL pipeline. dbt is a read-only test/documentation consumer of these relations."
-    meta:
-      materialized_by: "Databricks PySpark/SQL pipeline"
-      dbt_ownership: "external_source"
+    config:
+      meta:
+        materialized_by: "Databricks PySpark/SQL pipeline"
+        dbt_ownership: "external_source"
 
     tables:
       - name: fato_vendas
