@@ -75,7 +75,9 @@ Power BI is intentionally not declared as a dbt exposure yet because the consume
 
 ## Run in Databricks
 
-The canonical execution path is the Asset Bundle job:
+In the daily flow, dbt runs as the last task of `pipeline_diario`, after `gold_quality_gate`: tests always run against the Gold that the same run just built, never on a clock that could fire before Gold finishes. The project is deployed with the bundle (`source: WORKSPACE`), so the tests that run are exactly the committed version that was deployed, not whatever the Git branch holds at run time.
+
+To rerun only the tests against the current Gold, use the manual job:
 
 ```bash
 cd pipeline
@@ -85,4 +87,4 @@ databricks bundle deploy --target dev
 databricks bundle run dbt_tests --target dev
 ```
 
-The dbt job uses a native Databricks `dbt_task` against a SQL warehouse; the removed legacy Python subprocess runner is not part of the architecture.
+Both use a native Databricks `dbt_task` against a SQL warehouse resolved by name (`lookup`); the removed legacy Python subprocess runner is not part of the architecture.

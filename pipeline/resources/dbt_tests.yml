@@ -1,4 +1,5 @@
-# pipeline/resources/dbt_tests.yml — job de produção (deployado em dev e prod).
+# pipeline/resources/dbt_tests.yml — execução manual dos testes dbt sobre a Gold existente.
+# Sem agendamento: no fluxo diário o dbt roda como última task do pipeline_diario.
 
 resources:
   jobs:
@@ -6,18 +7,10 @@ resources:
       name: "[${bundle.target}] Varejinho — dbt Tests"
       tags:
         purpose: production
-      schedule:
-        quartz_cron_expression: "0 0 8,14,22 * * ?"
-        timezone_id: "America/Fortaleza"
-        pause_status: PAUSED
       email_notifications:
         on_failure:
           - ${var.alert_email}
       max_concurrent_runs: 1
-      git_source:
-        git_url: https://github.com/zaraluz/varejinho-data-platform.git
-        git_provider: gitHub
-        git_branch: ${bundle.git.branch}
       environments:
         - environment_key: dbt_env
           spec:
@@ -28,11 +21,11 @@ resources:
         - task_key: dbt_test
           environment_key: dbt_env
           dbt_task:
-            source: GIT
-            project_directory: dbt
+            source: WORKSPACE
+            project_directory: ${workspace.file_path}/dbt
             commands:
               - dbt test
             warehouse_id: ${var.warehouse_id}
             catalog: ${var.catalog}
             schema: gold
-          description: "dbt test — testes da Gold"
+          description: "dbt test manual sobre a Gold atual (mesmo projeto deployado pelo bundle)"

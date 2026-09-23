@@ -29,7 +29,7 @@ variables:
       warehouse: "Serverless Starter Warehouse"
 
 # O databricks.yml vive em pipeline/, mas a execução também precisa de
-# contracts/ e quality/. Ao sincronizar caminhos acima do bundle root,
+# contracts/, quality/, ops/, validation/ e dbt/. Ao sincronizar caminhos acima do bundle root,
 # o CLI preserva a estrutura do repositório no workspace.
 sync:
   paths:
@@ -38,6 +38,7 @@ sync:
     - ../quality
     - ../ops
     - ../validation
+    - ../dbt
 
 include:
   - resources/*.yml
@@ -80,8 +81,5 @@ targets:
           schedule:
             pause_status: PAUSED
         manutencao_semanal:
-          schedule:
-            pause_status: PAUSED
-        dbt_tests:
           schedule:
             pause_status: PAUSED
