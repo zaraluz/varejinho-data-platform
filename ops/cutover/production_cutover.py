@@ -53,7 +53,11 @@ STEPS = ["plan", "backup", "clone", "verify", "ownership", "rollback"]
 CLONED_SCHEMAS = ["silver", "control"]                 # dev → prod
 LEGACY_SCHEMAS = {"silver": "silver_legacy", "gold": "gold_legacy"}
 CONTROL_DIRS = ["schema_registry", "fact_partition_manifest"]   # estado real em dev
-LEGACY_CONTROL_DIRS = ["schema_registry", "watermark_backup"]   # legado na raiz de prod
+# Legado do pipeline antigo na raiz de prod: sai antes do clone porque o
+# schema_registry novo usa o mesmo caminho.
+LEGACY_CONTROL_DIRS = ["schema_registry"]
+# watermark_backup/ também está na raiz de prod, mas não é legado: a extração
+# on-premises grava um backup por dia ali, fora do Databricks. O cutover não toca.
 WATERMARK_TABLES = ["fact_watermark", "scd2_watermark"]
 
 if STEP not in STEPS:

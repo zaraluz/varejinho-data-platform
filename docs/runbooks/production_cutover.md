@@ -10,7 +10,8 @@ Moves production (`varejinho`) from the legacy state to the state validated in d
 | `varejinho.silver` (legacy) | Deep-cloned to `silver_legacy`, then replaced by `varejinho_dev.silver` |
 | `varejinho.gold` (legacy) | Deep-cloned to `gold_legacy`; rebuilt by the first production run (not cloned) |
 | `varejinho.control` | Created from `varejinho_dev.control` (fact and SCD2 watermarks, repair audits) |
-| `s3://varejinho-lake/_control/{schema_registry,watermark_backup}` (legacy) | Moved to `s3://varejinho-lake/_control_legacy/` |
+| `s3://varejinho-lake/_control/schema_registry/` (legacy) | Moved to `s3://varejinho-lake/_control_legacy/` |
+| `s3://varejinho-lake/_control/watermark_backup/` | Untouched: written daily by the on-premises extraction, not by Databricks |
 | `s3://varejinho-lake/_control/dev/{schema_registry,fact_partition_manifest}` | Copied to `s3://varejinho-lake/_control/` |
 | `_control/dev/` fixture sandboxes (`d4/`, `d7c/`, `_schema_drift_fixture/`) | Not copied |
 
