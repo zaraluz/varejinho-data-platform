@@ -310,7 +310,9 @@ def step_ownership() -> None:
     if DRY_RUN:
         print("✅ ownership (dry-run) listada")
         return
-    # A operadora é dona do catálogo e dos schemas; confirma que continua lendo.
+    # Ser dona do catálogo e dos schemas permite conceder, mas não dá SELECT nas
+    # tabelas do SP: a leitura humana vem do grupo varejinho-prod-readers
+    # (grants/bootstrap, seção 7). Confere que ela existe antes de encerrar.
     for schema in ["silver", "gold", "control"]:
         first = tables(TARGET, schema)[0]
         spark.table(f"{TARGET}.{schema}.{first}").limit(1).count()
