@@ -79,7 +79,7 @@ flowchart LR
 
 **Layer responsibilities.** Bronze preserves the raw source exactly and exposes file metadata. Silver turns it into a trustworthy interface: types, grain, deduplication, contracts, quarantine and history. Gold serves analytics: a star schema whose facts carry the dimension version valid at the business date of each event.
 
-**Environments.** `dev` and `prod` are separate Unity Catalog catalogs deployed from the same bundle. Dev reads the shared raw Bronze through read-only views (Unity Catalog does not allow two external tables on the same path) and writes only its own Silver, Gold and control state. Production jobs run as a service principal. Production state was cut over from the validated dev state by a versioned ops job (backup, deep clone, checksum verification; see the [runbook](docs/runbooks/production_cutover.md)), and the first production run passed the same gates as dev. The daily schedule stays paused until activation is decided.
+**Environments.** `dev` and `prod` are separate Unity Catalog catalogs deployed from the same bundle. Dev reads the shared raw Bronze through read-only views (Unity Catalog does not allow two external tables on the same path) and writes only its own Silver, Gold and control state. Production jobs run as a service principal. Production state was cut over from the validated dev state by a versioned ops job (backup, deep clone, checksum verification; see the [runbook](docs/runbooks/production_cutover.md)), and the first production run passed the same gates as dev. Production now runs on schedule; operations follow the [daily operations runbook](docs/runbooks/daily_operations.md).
 
 ---
 
@@ -217,6 +217,7 @@ Naming convention inside `validation/`: `profile_` and `diagnose_` only read; `p
 - [dbt layer](dbt/README.md)
 - [Production grants](ops/bootstrap/grant_prod_service_principal.sql): service principal and read-only group
 - [Production cutover runbook](docs/runbooks/production_cutover.md)
+- [Daily operations runbook](docs/runbooks/daily_operations.md): alerts, triage by failing task, repair vs. restore
 
 ---
 
@@ -269,7 +270,7 @@ Stated plainly, because a platform is only as trustworthy as its documented edge
 
 Planned work. Each step is validated with the same gates and fixtures before it is considered done.
 
-- **Activation.** Unpause the production schedule after an explicit decision; until then production runs are triggered manually.
+- **Freshness alert.** Failure emails only cover runs that start; add an alert for a daily run that never happened.
 - **Merchandise hierarchy.** Decide between flattening category names into `dim_produto` (one join per dimension for BI) and keeping the outrigger, before Power BI is reconnected.
 - **Narrower storage access.** Move control storage to an external volume so the service principal's file writes are scoped to it instead of the whole bucket.
 - **Accuracy.** Reconcile Gold against independent ERP totals (counts and financial measures), then reconnect Power BI to Gold.
