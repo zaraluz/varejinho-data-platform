@@ -1,6 +1,6 @@
 # Varejinho Data Platform
 
-![Databricks: Unity Catalog](https://img.shields.io/badge/Databricks-Unity%20Catalog-FF3621?style=flat&logo=databricks&logoColor=white&labelColor=555555) ![Delta Lake: Silver · Gold](https://img.shields.io/badge/Delta%20Lake-Silver%20%C2%B7%20Gold-00ADD4?style=flat&logo=delta&logoColor=white&labelColor=555555) ![PySpark: Spark SQL](https://img.shields.io/badge/PySpark-Spark%20SQL-E25A1C?style=flat&logo=apachespark&logoColor=white&labelColor=555555) ![dbt: Gold tests](https://img.shields.io/badge/dbt-Gold%20tests-FF694B?style=flat&logo=dbt&logoColor=white&labelColor=555555) ![Lakeflow Jobs: Asset Bundles](https://img.shields.io/badge/Lakeflow%20Jobs-Asset%20Bundles-1B3139?style=flat&labelColor=555555) ![AWS: S3 raw landing](https://img.shields.io/badge/AWS-S3%20raw%20landing-569A31?style=flat&logo=amazons3&logoColor=white&labelColor=555555) ![Pentaho: extraction](https://img.shields.io/badge/Pentaho-extraction-005B9A?style=flat&labelColor=555555) ![PostgreSQL: source ERP](https://img.shields.io/badge/PostgreSQL-source%20ERP-4169E1?style=flat&logo=postgresql&logoColor=white&labelColor=555555) ![status: release candidate](https://img.shields.io/badge/status-release%20candidate-DFB317?style=flat&labelColor=555555)
+![Databricks: Unity Catalog](https://img.shields.io/badge/Databricks-Unity%20Catalog-FF3621?style=flat&logo=databricks&logoColor=white&labelColor=555555) ![Delta Lake: Silver · Gold](https://img.shields.io/badge/Delta%20Lake-Silver%20%C2%B7%20Gold-00ADD4?style=flat&logo=delta&logoColor=white&labelColor=555555) ![PySpark: Spark SQL](https://img.shields.io/badge/PySpark-Spark%20SQL-E25A1C?style=flat&logo=apachespark&logoColor=white&labelColor=555555) ![dbt: Gold tests](https://img.shields.io/badge/dbt-Gold%20tests-FF694B?style=flat&logo=dbt&logoColor=white&labelColor=555555) ![Lakeflow Jobs: Asset Bundles](https://img.shields.io/badge/Lakeflow%20Jobs-Asset%20Bundles-1B3139?style=flat&labelColor=555555) ![AWS: S3 raw landing](https://img.shields.io/badge/AWS-S3%20raw%20landing-569A31?style=flat&logo=amazons3&logoColor=white&labelColor=555555) ![Pentaho: extraction](https://img.shields.io/badge/Pentaho-extraction-005B9A?style=flat&labelColor=555555) ![PostgreSQL: source ERP](https://img.shields.io/badge/PostgreSQL-source%20ERP-4169E1?style=flat&logo=postgresql&logoColor=white&labelColor=555555) ![status: in production](https://img.shields.io/badge/status-in%20production-3FB950?style=flat&labelColor=555555)
 
 **A retail lakehouse rebuilt on Databricks with production-grade guarantees:** incremental Silver processing that never reads an unfinished day, real SCD Type 2 history, point-in-time Gold facts, executable data contracts, controlled schema evolution and a release process where every claim is backed by a reproducible test.
 
@@ -59,7 +59,7 @@ flowchart LR
     subgraph DBX["Databricks · Unity Catalog"]
         BR["Bronze<br/>37 external tables<br/>(raw, read-only)"]
         SI["Silver · Delta<br/>14 incremental facts<br/>3 SCD2 dimensions<br/>20 reference entities"]
-        GO["Gold · Delta<br/>star schema<br/>5 dimensions · 9 facts<br/>point-in-time joins"]
+        GO["Gold · Delta<br/>star schema · 9 facts<br/>4 dimensions + 1 outrigger<br/>point-in-time joins"]
         DBT["dbt tests<br/>46 tests on 14 Gold sources"]
         BR --> SI --> GO --> DBT
     end
@@ -79,7 +79,7 @@ flowchart LR
 
 **Layer responsibilities.** Bronze preserves the raw source exactly and exposes file metadata. Silver turns it into a trustworthy interface: types, grain, deduplication, contracts, quarantine and history. Gold serves analytics: a star schema whose facts carry the dimension version valid at the business date of each event.
 
-**Environments.** `dev` and `prod` are separate Unity Catalog catalogs deployed from the same bundle. Dev reads the shared raw Bronze through read-only views (Unity Catalog does not allow two external tables on the same path) and writes only its own Silver, Gold and control state. Production jobs run as a service principal.
+**Environments.** `dev` and `prod` are separate Unity Catalog catalogs deployed from the same bundle. Dev reads the shared raw Bronze through read-only views (Unity Catalog does not allow two external tables on the same path) and writes only its own Silver, Gold and control state. Production jobs run as a service principal. Production state was cut over from the validated dev state by a versioned ops job (backup, deep clone, checksum verification; see the [runbook](docs/runbooks/production_cutover.md)), and the first production run passed the same gates as dev. The daily schedule stays paused until activation is decided.
 
 ---
 
@@ -154,7 +154,7 @@ The maturity rule compares dates in UTC. It holds today because the extractor's 
 
 ## Gold model
 
-Star schema built by PySpark/Spark SQL; dbt tests and documents it as external sources.
+Star schema built by PySpark/Spark SQL; dbt tests and documents it as external sources. Facts join four dimensions directly. The merchandise hierarchy (`dim_mercadologico`) is an outrigger: it is reached through the section, group and subgroup codes on `dim_produto`, so category names are one join further away.
 
 **Dimensions:** `dim_produto`, `dim_fornecedor`, `dim_mercadologico` (one row per SCD2 version, surrogate key = hash of id + `valid_from`), `dim_loja`, `dim_tempo` (one row per day).
 
@@ -207,7 +207,7 @@ contracts/       Silver data contracts (YAML) and tier policy
 dbt/             Read-only tests and documentation over Gold sources
 ops/             One-off, dev-guarded operations: bootstrap, SCD2 backfill (DR path), seeding, repairs, grants
 validation/      The evidence: fixtures, replays, profilers and diagnostics, grouped by block
-docs/            Decision log and architecture notes
+docs/            Decision log, architecture notes and runbooks
 ```
 
 Naming convention inside `validation/`: `profile_` and `diagnose_` only read; `prepare_` builds a sandbox; `verify_` checks the result and cleans up; `fixture_` does all three.
@@ -215,7 +215,8 @@ Naming convention inside `validation/`: `profile_` and `diagnose_` only read; `p
 - [Decision log](docs/decision_log.md): every architectural and operational decision with its reasoning and consequences
 - [Daily partition maturity](docs/architecture/daily_partition_maturity.md)
 - [dbt layer](dbt/README.md)
-- [Production service principal grants](ops/bootstrap/grant_prod_service_principal.sql)
+- [Production grants](ops/bootstrap/grant_prod_service_principal.sql): service principal and read-only group
+- [Production cutover runbook](docs/runbooks/production_cutover.md)
 
 ---
 
@@ -237,6 +238,8 @@ databricks bundle run pipeline_diario -t dev
 databricks bundle run facts_incremental_fixture -t dev
 ```
 
+Production is deployed the same way with `-t prod`; the deploying account needs the Service Principal: User role on the service principal. The one-time state cutover follows the [runbook](docs/runbooks/production_cutover.md).
+
 Runtime notebooks have no environment defaults: `catalog`, `bundle_files_path`, `control_root` and `bronze_source_catalog` come only from the target, and a missing value fails the task immediately.
 
 ---
@@ -244,7 +247,7 @@ Runtime notebooks have no environment defaults: `catalog`, `bundle_files_path`, 
 ## Governance and scope
 
 - **Production** is the release environment of this project on Databricks Free Edition. The company's operational reporting does not depend on it, and using real company data in this environment is subject to the company's authorization. Moving to a paid workspace is a change of `workspace.host` in the target.
-- **Least privilege.** Production jobs run as a service principal with versioned Unity Catalog grants: read-only Bronze; read, write and create on Silver, Gold and control; no admin rights. Bundle files live in a restricted folder, because whoever can edit the code a service principal runs effectively holds its privileges.
+- **Least privilege.** Production jobs run as a service principal with versioned Unity Catalog grants: read-only Bronze tables; read, write and create on Silver, Gold and control; no admin rights. The service principal owns the production tables, and people read them through a read-only group, so production changes only through the pipeline or a reviewed ops step. Bundle files live in a restricted folder, because whoever can edit the code a service principal runs effectively holds its privileges. One grant is still wider than needed: file write access covers the whole lake bucket, not only control storage (see next steps).
 - **Data minimization.** Supplier fields such as credentials, personal documents and phone numbers are excluded from Silver by an explicit allowlist.
 - **This repository contains code only.** No business data is committed; fixtures use synthetic identifiers. Code is published for portfolio review; all rights reserved.
 
@@ -266,7 +269,9 @@ Stated plainly, because a platform is only as trustworthy as its documented edge
 
 Planned work. Each step is validated with the same gates and fixtures before it is considered done.
 
-- **Production cutover.** Clone the validated dev state into the prod catalog, apply the service-principal grants, run once manually behind all gates, then activate the schedule.
+- **Activation.** Unpause the production schedule after an explicit decision; until then production runs are triggered manually.
+- **Merchandise hierarchy.** Decide between flattening category names into `dim_produto` (one join per dimension for BI) and keeping the outrigger, before Power BI is reconnected.
+- **Narrower storage access.** Move control storage to an external volume so the service principal's file writes are scoped to it instead of the whole bucket.
 - **Accuracy.** Reconcile Gold against independent ERP totals (counts and financial measures), then reconnect Power BI to Gold.
 - **CI.** GitHub Actions running bundle validation for both targets, linting and PySpark unit tests over the `quality/` engines, so regressions are caught in the pull request instead of in the workspace.
 - **Extraction v2.** One daily load (the ERP is D+1 anyway), partitions keyed by business date and a `_SUCCESS` marker written by the extractor. Maturity becomes "the partition is marked complete", removing the dependency on clock time and timezone.

@@ -36,10 +36,12 @@ Run from `pipeline/`. `bundle run` passes job parameters with `--params`.
 | 4 | Clone, dry run | `... --params step=clone` | 37 Silver and 4 control tables; 2 control folders |
 | 5 | Clone | `... --params step=clone,dry_run=false,confirm_target=varejinho` | Completes without error |
 | 6 | Verify | `... --params step=verify` | Every table and folder ✅ |
-| 7 | Grants | Run `ops/bootstrap/grant_prod_service_principal.sql` in the SQL editor | All statements succeed |
-| 8 | Ownership | `... --params step=ownership,dry_run=false,confirm_target=varejinho` | Tables owned by the service principal; operator still reads |
-| 9 | Deploy production | `databricks bundle validate -t prod` then `databricks bundle deploy -t prod` | 3 jobs, schedules `PAUSED` |
+| 7 | Grants | Create the group `varejinho-prod-readers` (operators as members, Consumer access only), then run `ops/bootstrap/grant_prod_service_principal.sql` in the SQL editor | `SHOW GRANTS ON SCHEMA varejinho.silver` lists the service principal (`USE SCHEMA`, `SELECT`, `MODIFY`, `CREATE TABLE`) and the readers group (`USE SCHEMA`, `SELECT`) |
+| 8 | Ownership | `... --params step=ownership,dry_run=false,confirm_target=varejinho` | Tables owned by the service principal; the operator still reads through the readers group |
+| 9 | Deploy production | `databricks bundle validate -t prod` then `databricks bundle deploy -t prod` | 3 jobs running as the service principal, schedules `PAUSED` |
 | 10 | First production run | `databricks bundle run -t prod pipeline_diario` | Silver QG, Gold QG and dbt pass, running as the service principal |
+
+Step 8 needs the readers group from step 7: owning the catalog and the schemas lets the operator grant privileges on the service principal's tables, not read them. Step 9 needs the deploying account to hold the **Service Principal: User** role on the service principal; without it the Jobs API rejects `run_as` with 403, and `bundle validate` does not check it.
 
 After step 10: README status badge to production, tag `v1.0.0` on that commit, GitHub Release as latest. Schedules stay paused until an explicit activation decision.
 
