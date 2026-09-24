@@ -799,7 +799,7 @@ Timeout and duration alerts are sized for this behavior. A second measured run (
 - `main` is protected by a ruleset: pull request required, no force push, no deletion. Linear history is not required, because it would forbid merge commits. Required approvals are 0 (single maintainer).
 
 **Why**
-This log, the validation history and the project tracker reference individual commit hashes from the feature branch. Squash and rebase merges create new hashes, and the original commits become unreachable once the branch is deleted. A release candidate is validated in the dev target but not yet in its destination; merge and production activation are separate approvals (see the 2026-09-22 entry on the release boundary).
+Each commit on the feature branch is one step of a gate (for example, the timeliness check added to the Silver quality gate). Keeping them on `main` means `git log -- <file>` and `git blame` point to the exact step behind each guarantee; a squash would collapse 318 steps into a single commit. The project tracker also references individual commits, and squash or rebase merges would leave those references without a target once the branch is deleted. A release candidate is validated in the dev target but not yet in its destination; merge and production activation are separate approvals (see the 2026-09-22 entry on the release boundary).
 
 **Consequence**
 History is non-linear by design; `git log --first-parent main` shows one entry per merged release. The version string carries deployment status: a `-rc` suffix means validated in dev, a plain version means running in production.
