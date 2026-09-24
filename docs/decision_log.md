@@ -823,3 +823,14 @@ A cutover typed into a console leaves no reviewable record and cannot be repeate
 
 **Consequence**
 Rollback is a scripted step as long as the operator still owns the tables. The runbook lives in `docs/runbooks/production_cutover.md`.
+
+## 2026-09-24 — `watermark_backup/` stays in the production control root
+
+**Decision**
+The cutover moves only the legacy `schema_registry/` to `_control_legacy/`. `watermark_backup/` stays where it is, and no cutover step touches it.
+
+**Why**
+The inventory classified the folder as legacy because no Databricks job and no table history wrote to it. The backup step showed otherwise. The move stopped at a file whose name contains `:`, which Hadoop paths cannot copy, and the listing taken to diagnose it showed one file per day up to the current date. The writer is the on-premises extraction, outside Databricks. Moving the folder would be undone by the extraction's next run, and the folder is not the platform's to move.
+
+**Consequence**
+Job lists and table history show who writes to tables; they do not show who writes to a storage prefix. Inventories of storage paths also check object modification times. Until extraction v2 gives the extraction its own prefix, `_control/` holds state from two owners: the platform (`schema_registry/`, `fact_partition_manifest/`) and the extraction (`watermark_backup/`).
