@@ -803,3 +803,23 @@ Each commit on the feature branch is one step of a gate (for example, the timeli
 
 **Consequence**
 History is non-linear by design; `git log --first-parent main` shows one entry per merged release. The version string carries deployment status: a `-rc` suffix means validated in dev, a plain version means running in production.
+
+---
+
+## 2026-09-24 — The cutover runs as a versioned ops job, one step at a time
+
+**Decision**
+The production cutover is `ops/cutover/production_cutover.py`, exposed as the dev-only job `production_cutover` and run one step at a time (plan, backup, clone, verify, ownership, rollback). Every step defaults to a dry run, and writes require `confirm_target` to name the production catalog. The job runs as the operator, who owns both catalogs; the production service principal has no access to dev by design.
+
+Findings from the read-only inventory shaped the steps:
+- no production job existed and both scheduled dev jobs were paused;
+- recent `last_altered` timestamps on production tables had no matching Delta commits (metadata maintenance, not writes);
+- the production control root already held a legacy `schema_registry/`, the same path the new drift engine uses, so the legacy folders move to `_control_legacy/` before the validated state is copied;
+- the dev control root also holds fixture sandboxes, so only `schema_registry/` and `fact_partition_manifest/` are copied;
+- Gold is not cloned, because the first production run rebuilds it from the cloned Silver.
+
+**Why**
+A cutover typed into a console leaves no reviewable record and cannot be repeated. As code, it goes through a pull request, prints its full plan before writing, refuses to overwrite its own backup, and proves the result with checksums instead of spot checks.
+
+**Consequence**
+Rollback is a scripted step as long as the operator still owns the tables. The runbook lives in `docs/runbooks/production_cutover.md`.
