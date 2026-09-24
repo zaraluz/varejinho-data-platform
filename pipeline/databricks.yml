@@ -75,11 +75,14 @@ targets:
       catalog: varejinho
       bronze_source_catalog: varejinho
       control_root: s3://varejinho-lake/_control
+    # Ativação (F9, 24/09): schedules de prod ligados pelo bundle, não pela interface.
+    # O bundle é a fonte da verdade: um "Resume" na interface seria desfeito em
+    # silêncio pelo próximo deploy. Operação: docs/runbooks/daily_operations.md.
     resources:
       jobs:
         pipeline_diario:
           schedule:
-            pause_status: PAUSED
+            pause_status: UNPAUSED
         manutencao_semanal:
           schedule:
-            pause_status: PAUSED
+            pause_status: UNPAUSED
