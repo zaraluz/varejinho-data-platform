@@ -5,8 +5,9 @@
 -- Principal: sp-varejinho-pipeline-prod
 -- Application ID: bf71079b-64e1-4763-8b86-1e90718d8864
 --
--- Quando executar: no cutover (F8/R7), DEPOIS do DEEP CLONE para `varejinho`
--- e ANTES do primeiro run de prod. Executar como owner/admin no SQL editor.
+-- Quando executar: no cutover, DEPOIS do step=clone (que cria varejinho.control)
+-- e ANTES do step=ownership e do primeiro run de prod. Executar como owner/admin
+-- no SQL editor. Runbook: docs/runbooks/production_cutover.md.
 -- Idempotente: GRANT repetido não duplica privilégio.
 --
 -- Princípio: o SP lê a Bronze, escreve Silver/Gold/control e lê/escreve o
@@ -26,9 +27,9 @@ GRANT USE SCHEMA, SELECT, MODIFY, CREATE TABLE ON SCHEMA varejinho.control TO `b
 
 -- 4) Control storage no S3 (watermarks auxiliares, baselines de schema drift,
 --    manifests de partição): leitura e escrita de arquivos.
---    <EXTERNAL_LOCATION>: confirmar o nome com `SHOW EXTERNAL LOCATIONS` e que a
---    URL cobre s3://varejinho-lake/_control antes de executar.
-GRANT READ FILES, WRITE FILES ON EXTERNAL LOCATION `<EXTERNAL_LOCATION>` TO `bf71079b-64e1-4763-8b86-1e90718d8864`;
+--    `varejinho_lake_new` = s3://varejinho-lake/ (confirmado com SHOW EXTERNAL
+--    LOCATIONS em 24/09). A `varejinho_lake` aponta para o bucket antigo e não é usada.
+GRANT READ FILES, WRITE FILES ON EXTERNAL LOCATION `varejinho_lake_new` TO `bf71079b-64e1-4763-8b86-1e90718d8864`;
 
 -- 5) Ownership das tabelas clonadas (Silver/Gold/control) é transferida para o SP
 --    no runbook do cutover (ALTER TABLE ... OWNER TO), para que CREATE OR REPLACE

@@ -1069,3 +1069,39 @@ targets:
               notebook_task:
                 notebook_path: ${workspace.file_path}/ops/seed/bootstrap_schema_drift_baselines.py
               description: "One-time: cria baselines ausentes a partir da Silver validada; nunca sobrescreve existentes"
+
+        production_cutover:
+          # Lê dev e escreve prod: roda como a operadora (dona dos dois catálogos),
+          # um passo por execução. Destino de prod explícito aqui porque o job só
+          # existe no target dev; a escrita ainda exige confirm_target no run.
+          name: "[${bundle.target}] Varejinho — Ops Production Cutover"
+          tags:
+            purpose: ops
+            block: release
+          max_concurrent_runs: 1
+          parameters:
+            - name: step
+              default: plan
+            - name: dry_run
+              default: "true"
+            - name: confirm_target
+              default: "-"
+            - name: skip_active_run_check
+              default: "false"
+            - name: source_catalog
+              default: ${var.catalog}
+            - name: target_catalog
+              default: varejinho
+            - name: source_control_root
+              default: ${var.control_root}
+            - name: target_control_root
+              default: s3://varejinho-lake/_control
+            - name: legacy_control_root
+              default: s3://varejinho-lake/_control_legacy
+            - name: service_principal
+              default: bf71079b-64e1-4763-8b86-1e90718d8864
+          tasks:
+            - task_key: cutover_step
+              notebook_task:
+                notebook_path: ${workspace.file_path}/ops/cutover/production_cutover.py
+              description: "Um passo do cutover (plan, backup, clone, verify, ownership, rollback); dry_run por padrão"
