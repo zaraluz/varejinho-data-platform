@@ -88,8 +88,6 @@ Este documento descreve as transformações aplicadas em cada camada da platafor
 | Colunas excluídas | `id_comprador`, `cupomfiscal`, `id_tipooferta` |
 | Partição | `ano`, `mes` |
 
-**Volumetria:** 4.350.931 linhas
-
 ---
 
 ## notaentrada
@@ -296,8 +294,6 @@ Este documento descreve as transformações aplicadas em cada camada da platafor
 | Chave de dedup | `id` |
 | Sem partição | Sem coluna de data própria |
 
-**Volumetria:** 692.216 linhas
-
 ---
 
 ## perda
@@ -349,8 +345,6 @@ Este documento descreve as transformações aplicadas em cada camada da platafor
 | Colunas excluídas | `id_notasaida`, `emitenota`, `id_aliquota`, `id_tipopiscofins` |
 | Partição | `ano`, `mes` |
 
-**Volumetria:** 83.596 linhas | 20 motivos distintos
-
 ---
 
 ## logestoque
@@ -399,8 +393,6 @@ Este documento descreve as transformações aplicadas em cada camada da platafor
 | Join dim_produto | LEFT JOIN temporal |
 | Colunas excluídas | `datahora`, `id_usuario` |
 | Partição | `ano`, `mes` |
-
-**Volumetria:** 21.870.398 linhas | 15 tipos de movimentação
 
 ---
 
@@ -484,8 +476,6 @@ Este documento descreve as transformações aplicadas em cada camada da platafor
 | Colunas excluídas | `controle`, `verificaprodutosauditados`, `desconsideraritem`, `diasexpiracao` |
 | Partição | `ano`, `mes` |
 
-**Volumetria:** 334.298 linhas | 27.784 promoções distintas
-
 ---
 
 ## oferta
@@ -536,11 +526,9 @@ Este documento descreve as transformações aplicadas em cada camada da platafor
 | SK | `MD5(id \|\| id_loja)` |
 | Colunas calculadas | `desconto_valor = preconormal - precooferta`, `desconto_percentual` |
 | Join dim_produto | LEFT JOIN temporal |
-| Sinal analítico | `desconto_valor < 0` → margem negativa em oferta (9.198 casos) |
+| Sinal analítico | `desconto_valor < 0` → margem negativa em oferta |
 | Colunas excluídas | `controle`, `encerraofertaitens`, `bloquearvendaitens`, `enviaconnect`, `aplicapercentualprecoassociado` |
 | Partição | `ano`, `mes` |
-
-**Volumetria:** 77.963 linhas | 9.198 com preço de oferta acima do normal
 
 ---
 
@@ -638,8 +626,6 @@ Este documento descreve as transformações aplicadas em cada camada da platafor
 | Colunas excluídas | `email`, `id_usuario`, `gerousugestao`, `justificativapedidosemagenda` |
 | Partição | `ano`, `mes` do `pedido` |
 
-**Volumetria:** 241.203 linhas | 13.743 pedidos distintos
-
 ---
 
 ## pagarfornecedor
@@ -726,11 +712,9 @@ Este documento descreve as transformações aplicadas em cada camada da platafor
 | SK | `MD5(id_parcela \|\| id_loja)` |
 | Join cabeçalho | INNER JOIN com `pagarfornecedor` |
 | Join dim_fornecedor | LEFT JOIN `is_current = true` |
-| Colunas nullable | `sk_tempo_pagamento`, `datapagamento` — NULL para 2.362 parcelas não pagas |
+| Colunas nullable | `sk_tempo_pagamento`, `datapagamento` — NULL para parcelas não pagas |
 | Colunas excluídas | `id_conciliacaobancarialancamento`, `id_contacontabilfinanceiro`, `id_favorecido`, `exportado` |
 | Partição | `ano`, `mes` do vencimento |
-
-**Volumetria:** 75.573 linhas | 2.362 parcelas não pagas
 
 ---
 
@@ -778,8 +762,6 @@ Este documento descreve as transformações aplicadas em cada camada da platafor
 | Join dim_fornecedor | LEFT JOIN `is_current = true` — nullable |
 | Colunas excluídas | `pendenciaworkflow`, `id_abastecimento`, `id_tiposervico`, `datahoraalteracao` |
 | Partição | `ano`, `mes` |
-
-**Volumetria:** 19.361 linhas
 
 ---
 
@@ -909,8 +891,6 @@ Este documento descreve as transformações aplicadas em cada camada da platafor
 | Colunas incluídas | `descricao_completa/reduzida`, `ncm`, hierarquia mercadológica, `id_tipoembalagem`, `id_tipomercadoria`, `datacadastro`, `dataalteracao`, controle SCD2 |
 | Colunas excluídas | Atributos fiscais, flags operacionais, dimensões físicas de embalagem |
 
-**Volumetria:** 75.251 linhas
-
 ---
 
 ## fornecedor (SCD Tipo 2)
@@ -1025,8 +1005,6 @@ Este documento descreve as transformações aplicadas em cada camada da platafor
 | Colunas incluídas | `razao_social`, `nome_fantasia`, `cnpj`, controle SCD2 |
 | Colunas excluídas | Dados bancários, configurações de negociação, flags operacionais, `senha` |
 
-**Volumetria:** 1.076 linhas
-
 ---
 
 ## mercadologico (SCD Tipo 2)
@@ -1056,8 +1034,6 @@ Este documento descreve as transformações aplicadas em cada camada da platafor
 | Colunas monitoradas SCD2 | `descricao`, `mercadologico1/2/3`, `nivel` |
 | valid_from | `DATE '2020-01-01'` — sem `datacadastro` no ERP |
 | Colunas excluídas na Gold | `mercadologico4/5`, `id_centrocusto`, `descricaolojavirtual` |
-
-**Volumetria:** 628 linhas
 
 ---
 
@@ -1090,8 +1066,6 @@ Este documento descreve as transformações aplicadas em cada camada da platafor
 | Colunas incluídas | `descricao`, `id_regiao`, `lojavirtual`, `atacado` |
 | Colunas excluídas | `id_fornecedor`, `nomeservidor`, `servidorcentral`, `geraconcentrador`, `estoqueterceiro`, `id_situacaocadastro` |
 
-**Volumetria:** 3 linhas (2 lojas + CD)
-
 ---
 
 ## dim_tempo (gerada por código)
@@ -1114,7 +1088,7 @@ Não extraída do ERP — gerada no Databricks via `sequence()`.
 | is_fim_semana | boolean | |
 | estacao_sul | string | Verão/Outono/Inverno/Primavera |
 
-**Volumetria:** 1.826 linhas (2023-01-01 a 2027-12-31)
+**Cobertura:** 2023-01-01 a 2027-12-31
 
 ---
 
@@ -1165,8 +1139,6 @@ Não extraída do ERP — gerada no Databricks via `sequence()`.
 | SK | `MD5(id_produto \|\| id_loja \|\| snapshot_date)` |
 | Join dim_produto | LEFT JOIN temporal |
 | Partição | `snapshot_date` |
-
-**Volumetria:** 136.357 linhas | 8 snapshots | 11.931 produtos
 
 ---
 

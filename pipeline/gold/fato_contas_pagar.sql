@@ -4,7 +4,7 @@
 -- Join temporal com dim_fornecedor pela data de emissão do documento
 -- Partição: ano/mes do vencimento da parcela
 -- Base para análise de DRE e fluxo de caixa
--- datapagamento nullable — parcelas não pagas retornam sk_tempo_pagamento NULL (2.362 casos)
+-- datapagamento nullable — parcelas não pagas retornam sk_tempo_pagamento NULL
 
 CREATE OR REPLACE TABLE varejinho.gold.fato_contas_pagar
 USING DELTA
