@@ -834,3 +834,17 @@ The inventory classified the folder as legacy because no Databricks job and no t
 
 **Consequence**
 Job lists and table history show who writes to tables; they do not show who writes to a storage prefix. Inventories of storage paths also check object modification times. Until extraction v2 gives the extraction its own prefix, `_control/` holds state from two owners: the platform (`schema_registry/`, `fact_partition_manifest/`) and the extraction (`watermark_backup/`).
+
+## 2026-09-24 — Production is written only by the service principal and read through a group
+
+**Decision**
+After the cutover, every Silver, Gold and control table in production is owned by the service principal. People read production through the group `varejinho-prod-readers`, which holds `USE CATALOG` and `USE SCHEMA, SELECT` on the four schemas and nothing else, with the minimum workspace entitlement (Consumer access). The account that deploys the bundle holds the Service Principal: User role on the service principal.
+
+**Why**
+- The ownership step checks its own post-condition, and that check failed: owning the catalog and the schemas lets the operator grant privileges on the service principal's tables, not read them. Read access had to be granted explicitly.
+- Granting to a group instead of a person keeps the versioned grants free of personal data, turns onboarding and offboarding into a membership change instead of a code change, and makes "who reads production" a single line in `SHOW GRANTS`.
+- Read-only access for people separates duties: production changes only through the pipeline or a reviewed ops step. Writing as a person becomes an explicit act, such as transferring ownership back before a rollback.
+- The first production deploy was rejected with 403, because binding a service principal to `run_as` requires an explicit role on it; otherwise anyone who can create a job could borrow its privileges. `bundle validate` does not check authorization.
+
+**Consequence**
+The runbook creates the group before the ownership step and names the deploy role before step 9. The first production run, executed as the service principal, passed the same gates as dev: Silver quality gate 113/113, Gold quality gate 52/52, dbt 44 pass / 2 warn / 0 error. The daily schedule stays paused until activation is decided. The service principal's `WRITE FILES` covers the whole lake bucket, not only control storage; narrowing it to an external volume is listed in the next steps.
