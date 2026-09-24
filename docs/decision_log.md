@@ -848,3 +848,16 @@ After the cutover, every Silver, Gold and control table in production is owned b
 
 **Consequence**
 The runbook creates the group before the ownership step and names the deploy role before step 9. The first production run, executed as the service principal, passed the same gates as dev: Silver quality gate 113/113, Gold quality gate 52/52, dbt 44 pass / 2 warn / 0 error. The daily schedule stays paused until activation is decided. The service principal's `WRITE FILES` covers the whole lake bucket, not only control storage; narrowing it to an external volume is listed in the next steps.
+
+## 2026-09-24 — Production runs on schedule
+
+**Decision**
+`pipeline_diario` (daily at 03:00, America/Fortaleza) and `manutencao_semanal` (Sundays at 02:00) are unpaused in the prod target of the bundle. Operations follow `docs/runbooks/daily_operations.md`.
+
+**Why**
+- The evidence for running unattended was in place: the first production run passed every gate as the service principal; failure emails had already reached the alert address from dev jobs, through the same mechanism; the run starts after the source closes the day, and D+1 maturity keeps the 02:00 dimension extraction out of the 03:00 run.
+- The schedule changes through the bundle, not the job UI. The bundle is the source of truth: a UI toggle would be reverted silently by the next deploy, and it would leave no record of who changed it or why.
+- Maintenance starts with the pipeline: each daily `CREATE OR REPLACE` of Gold leaves the previous files behind, and the weekly `VACUUM` bounds that growth.
+
+**Consequence**
+Activation counts as done after three consecutive green scheduled runs and the first weekly maintenance. Failure emails cover only runs that start; until a freshness alert exists, a morning glance at the run list covers a run that never started.
