@@ -12,6 +12,7 @@
 --
 -- Princípio: o SP lê a Bronze, escreve Silver/Gold/control e lê/escreve o
 -- control storage no S3. Não recebe ALL PRIVILEGES, MANAGE nem CREATE SCHEMA.
+-- Pessoas só leem prod, por um grupo (seção 7): quem escreve é o SP.
 
 -- 1) Entrar no catálogo
 GRANT USE CATALOG ON CATALOG varejinho TO `bf71079b-64e1-4763-8b86-1e90718d8864`;
@@ -29,6 +30,8 @@ GRANT USE SCHEMA, SELECT, MODIFY, CREATE TABLE ON SCHEMA varejinho.control TO `b
 --    manifests de partição): leitura e escrita de arquivos.
 --    `varejinho_lake_new` = s3://varejinho-lake/ (confirmado com SHOW EXTERNAL
 --    LOCATIONS em 24/09). A `varejinho_lake` aponta para o bucket antigo e não é usada.
+--    Escopo: a external location é o bucket inteiro (inclui bronze/), mais largo que
+--    o control storage. Estreitar com um volume externo em _control/ é próximo passo.
 GRANT READ FILES, WRITE FILES ON EXTERNAL LOCATION `varejinho_lake_new` TO `bf71079b-64e1-4763-8b86-1e90718d8864`;
 
 -- 5) Ownership das tabelas clonadas (Silver/Gold/control) é transferida para o SP
@@ -37,3 +40,19 @@ GRANT READ FILES, WRITE FILES ON EXTERNAL LOCATION `varejinho_lake_new` TO `bf71
 
 -- 6) Fora do SQL: SQL Warehouse "Serverless Starter Warehouse" -> Permissions ->
 --    adicionar o SP com "Can use" (necessário para a task dbt).
+
+-- 7) Leitura humana em prod: grupo, não pessoa (RBAC). Depois do step=ownership
+--    as tabelas pertencem ao SP; ser dona do catálogo e dos schemas permite
+--    conceder privilégios nelas, mas não dá SELECT. O grupo só lê.
+--    Criar o grupo antes (membros: operadores; entitlement: só Consumer access)
+--    e aplicar antes do step=ownership, que confere a leitura no final.
+GRANT USE CATALOG ON CATALOG varejinho TO `varejinho-prod-readers`;
+GRANT USE SCHEMA, SELECT ON SCHEMA varejinho.bronze  TO `varejinho-prod-readers`;
+GRANT USE SCHEMA, SELECT ON SCHEMA varejinho.silver  TO `varejinho-prod-readers`;
+GRANT USE SCHEMA, SELECT ON SCHEMA varejinho.gold    TO `varejinho-prod-readers`;
+GRANT USE SCHEMA, SELECT ON SCHEMA varejinho.control TO `varejinho-prod-readers`;
+
+-- 8) Fora do SQL: quem faz o `bundle deploy -t prod` precisa do papel
+--    "Service Principal: User" no SP (Settings -> Identity and access ->
+--    Service principals -> Permissions). Sem ele, a API de Jobs recusa o run_as
+--    com 403; o `bundle validate` não confere autorização.
