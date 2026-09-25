@@ -18,7 +18,11 @@ variables:
   bronze_source_catalog:
     description: "Catálogo que expõe a Bronze raw compartilhada"
   control_root:
-    description: "Raiz dos artefatos de controle do ambiente"
+    description: >-
+      Raiz dos artefatos de controle do ambiente (baselines de schema drift,
+      manifests de partição): um volume externo do Unity Catalog por ambiente,
+      para que a escrita de arquivos do pipeline fique restrita a ele e não ao
+      bucket inteiro. Criação e grants: ops/storage/control_volumes.sql.
   alert_email:
     description: >-
       Destino dos alertas de falha dos jobs. Sem default e fora do Git:
@@ -52,7 +56,7 @@ targets:
     variables:
       catalog: varejinho_dev
       bronze_source_catalog: varejinho
-      control_root: s3://varejinho-lake/_control/dev
+      control_root: /Volumes/varejinho_dev/control/control_files   # s3://varejinho-lake/_control_dev/
 
   prod:
     mode: production
@@ -75,7 +79,7 @@ targets:
     variables:
       catalog: varejinho
       bronze_source_catalog: varejinho
-      control_root: s3://varejinho-lake/_control
+      control_root: /Volumes/varejinho/control/control_files       # s3://varejinho-lake/_control/
     # Ativação (F9, 24/09): schedules de prod ligados pelo bundle, não pela interface.
     # O bundle é a fonte da verdade: um "Resume" na interface seria desfeito em
     # silêncio pelo próximo deploy. Operação: docs/runbooks/daily_operations.md.

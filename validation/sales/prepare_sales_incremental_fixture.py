@@ -32,7 +32,7 @@ def required_param(nome: str) -> str:
 
 CATALOG = job_param("catalog", "varejinho_dev")
 BUNDLE_FILES_PATH = required_param("bundle_files_path").rstrip("/")
-CONTROL_ROOT = job_param("control_root", "s3://varejinho-lake/_control/dev").rstrip("/")
+CONTROL_ROOT = job_param("control_root", "/Volumes/varejinho_dev/control/control_files").rstrip("/")
 DRIFT_CONTROL_ROOT = CONTROL_ROOT if CONTROL_ROOT.endswith("/d7c") else f"{CONTROL_ROOT}/d7c"
 
 BRONZE = f"{CATALOG}.control._d7c_venda_bronze"
@@ -44,7 +44,7 @@ HIST = f"{CATALOG}.silver._d7c_quarantine_history_venda"
 if not CATALOG.endswith("_dev"):
     raise Exception(f"Gate D7C só pode executar em *_dev. Recebido: {CATALOG}")
 
-# Registry isolado da fixture. Nunca remove o registry real em .../_control/dev/schema_registry.
+# Registry isolado da fixture. Nunca remove o registry real em .../control_files/schema_registry.
 dbutils.fs.rm(DRIFT_CONTROL_ROOT, True)
 
 for table in [HIST, QUAR, SILVER, CONTROL, BRONZE]:

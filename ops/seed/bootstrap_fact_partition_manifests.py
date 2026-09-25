@@ -36,7 +36,7 @@ CATALOG = job_param("catalog", "varejinho_dev")
 BRONZE_SOURCE_CATALOG = job_param("bronze_source_catalog", "varejinho")
 CONTROL_ROOT = job_param(
     "control_root",
-    "s3://varejinho-lake/_control/dev",
+    "/Volumes/varejinho_dev/control/control_files",
 ).rstrip("/")
 BUNDLE_FILES_PATH = required_param("bundle_files_path").rstrip("/")
 CONTROL_TABLE = f"{CATALOG}.control.fact_watermark"

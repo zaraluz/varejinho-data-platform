@@ -32,7 +32,7 @@ def required_param(nome: str) -> str:
 
 CATALOG = job_param("catalog", "varejinho_dev")
 BUNDLE_FILES_PATH = required_param("bundle_files_path").rstrip("/")
-CONTROL_ROOT = job_param("control_root", "s3://varejinho-lake/_control/dev").rstrip("/")
+CONTROL_ROOT = job_param("control_root", "/Volumes/varejinho_dev/control/control_files").rstrip("/")
 DRIFT_CONTROL_ROOT = CONTROL_ROOT if CONTROL_ROOT.endswith("/d4") else f"{CONTROL_ROOT}/d4"
 
 BRONZE = f"{CATALOG}.control._d4_pedido_bronze"
@@ -45,7 +45,7 @@ if not CATALOG.endswith("_dev"):
     raise Exception(f"Gate D4 só pode executar em *_dev. Recebido: {CATALOG}")
 
 # A fixture precisa de registry próprio. Remover o sandbox anterior é parte do setup,
-# nunca toca no registry real em .../_control/dev/schema_registry.
+# nunca toca no registry real em .../control_files/schema_registry.
 dbutils.fs.rm(DRIFT_CONTROL_ROOT, True)
 
 for table in [HIST, QUAR, SILVER, CONTROL, BRONZE]:

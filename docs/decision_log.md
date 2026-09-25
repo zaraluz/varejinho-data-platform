@@ -907,6 +907,22 @@ For non-null inputs the hashed string is unchanged, so an existing key can only 
 **Consequence**
 The watchdog shares the workspace and the scheduler with the pipeline: a workspace-wide outage, or a pause of the watchdog itself, is silent again. The daily operations runbook keeps a weekly look at its run list, and an external heartbeat is the next step if that residual matters. Proven in dev: 26/26 on the current state; with the threshold forced to 0 days the 14 fact watermarks fail after one retry, and the failure email arrives.
 
+## 2026-09-25 — The pipeline writes files only to its control volume
+
+**Decision**
+Control state (schema drift baselines, partition manifests) lives in one external Unity Catalog volume per environment: `varejinho.control.control_files` over `s3://varejinho-lake/_control/` and `varejinho_dev.control.control_files` over `s3://varejinho-lake/_control_dev/`. The production service principal gets `READ VOLUME` and `WRITE VOLUME` on its volume and loses `READ FILES` and `WRITE FILES` on the external location `varejinho_lake_new`. Code reaches control state through `/Volumes/...` paths, from the bundle variable `control_root`.
+
+**Why**
+- The external location is the whole bucket, including `bronze/`, the only copy of the raw extracts outside the ERP. A bug or a leaked credential in the pipeline could overwrite or delete raw files, and nothing in Unity Catalog would stop it.
+- The pipeline never reads Bronze by path. It reads Bronze tables, so `SELECT` is enough; the bucket-wide file privileges were only ever needed for control state.
+- A volume gives the control prefix its own object and its own privileges. Access through the prefix's cloud URI also follows the volume's grants instead of the location's, so the old `s3://` path keeps working during the transition and cannot bypass the new boundary.
+- Alternatives: keep the location grant and rely on code review (nothing enforces it); move all control state to managed tables (the drift engine writes JSON files; a larger rewrite for the same privilege outcome).
+
+**Consequence**
+- Volumes cannot overlap, so dev control moves from `_control/dev/` to `_control_dev/` (copied, verified, then deleted by an ops job). Production files do not move.
+- Accepted residual: `_control/watermark_backup/`, written by the on-premises extraction, sits inside the production volume, so the service principal could write it. It leaves when extraction v2 gives the extraction its own prefix.
+- Least privilege cannot be proven in dev, where jobs run as the operator. It is proven in production by a run after the revoke, with a one-statement rollback. Runbook: `docs/runbooks/control_volume_migration.md`.
+
 ## 2026-09-28 — The Silver grain of `notaentrada` is the ERP entry id
 
 **Decision**

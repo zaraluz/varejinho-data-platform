@@ -33,7 +33,7 @@ def required_param(nome: str) -> str:
 CATALOG = job_param("catalog", "varejinho_dev")
 CONTROL_ROOT = job_param(
     "control_root",
-    "s3://varejinho-lake/_control/dev/r2_partition_manifest_fixture",
+    "/Volumes/varejinho_dev/control/control_files/r2_partition_manifest_fixture",
 ).rstrip("/")
 BUNDLE_FILES_PATH = required_param("bundle_files_path").rstrip("/")
 

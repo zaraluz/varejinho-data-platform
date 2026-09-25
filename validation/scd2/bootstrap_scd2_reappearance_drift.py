@@ -30,7 +30,7 @@ def required_param(nome: str) -> str:
 CATALOG = job_param("catalog", "varejinho_dev")
 CONTROL_ROOT = job_param(
     "control_root",
-    "s3://varejinho-lake/_control/dev/r3_scd2_reappearance",
+    "/Volumes/varejinho_dev/control/control_files/r3_scd2_reappearance",
 ).rstrip("/")
 BUNDLE_FILES_PATH = required_param("bundle_files_path").rstrip("/")
 SILVER = f"{CATALOG}.silver._r3_supplier_reappearance_incremental"

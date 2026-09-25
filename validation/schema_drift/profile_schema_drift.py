@@ -47,7 +47,7 @@ def required_param(nome: str) -> str:
 
 
 CATALOG = job_param("catalog", "varejinho_dev")
-CONTROL_ROOT = job_param("control_root", "s3://varejinho-lake/_control/dev").rstrip("/")
+CONTROL_ROOT = job_param("control_root", "/Volumes/varejinho_dev/control/control_files").rstrip("/")
 BUNDLE_FILES_PATH = required_param("bundle_files_path").rstrip("/")
 REGISTRY_ROOT = f"{CONTROL_ROOT}/schema_registry"
 POLICY_PATH = f"{BUNDLE_FILES_PATH}/contracts/silver/_policy.yaml"
