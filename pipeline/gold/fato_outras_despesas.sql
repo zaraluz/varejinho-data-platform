@@ -15,7 +15,7 @@ WITH situacao AS (
 )
 SELECT
     -- Surrogate key do fato
-    md5(concat_ws('||', CAST(od.id AS STRING), CAST(od.id_loja AS STRING))) AS sk_despesa,
+    md5(concat_ws('||', coalesce(CAST(od.id AS STRING), '<NULL>'), coalesce(CAST(od.id_loja AS STRING), '<NULL>'))) AS sk_despesa,
 
     -- Chaves estrangeiras
     f.sk_fornecedor,

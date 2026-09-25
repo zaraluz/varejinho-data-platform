@@ -20,9 +20,9 @@ WITH abc AS (
 SELECT
     -- Surrogate key do fato
     md5(concat_ws('||',
-        CAST(c.id_produto AS STRING),
-        CAST(c.id_loja AS STRING),
-        CAST(c.snapshot_date AS STRING)))                                    AS sk_curva,
+        coalesce(CAST(c.id_produto AS STRING), '<NULL>'),
+        coalesce(CAST(c.id_loja AS STRING), '<NULL>'),
+        coalesce(CAST(c.snapshot_date AS STRING), '<NULL>')))                                    AS sk_curva,
 
     -- Chaves estrangeiras
     p.sk_produto,

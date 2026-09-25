@@ -6,7 +6,7 @@ CREATE OR REPLACE TABLE varejinho.gold.dim_mercadologico
 USING DELTA
 AS
 SELECT
-    md5(concat_ws('||', CAST(id AS STRING), CAST(valid_from AS STRING))) AS sk_mercadologico,
+    md5(concat_ws('||', coalesce(CAST(id AS STRING), '<NULL>'), coalesce(CAST(valid_from AS STRING), '<NULL>'))) AS sk_mercadologico,
     id                  AS id_mercadologico,
     descricao,
     mercadologico1      AS secao,
