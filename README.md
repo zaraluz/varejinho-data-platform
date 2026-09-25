@@ -127,6 +127,7 @@ Each guarantee has a mechanism in the runtime and an isolated fixture that prove
 | A schema change is a decision, not a side effect | Drift is detected and classified; baselines change only through explicit promotion | S2 6/6, 37/37 baselines audited exact vs. Silver |
 | The pipeline cannot stall silently | Timeliness check: committed watermark at most 2 days behind the business date | Silver QG (14 checks) |
 | Gold is correct and consistent | Gold quality gate + dbt source tests | Gold QG 73/73, dbt 61 pass / 2 warn / 0 error |
+| Gold agrees with the ERP's own reports | Top-down reconciliation against ERP reports: period × store, then day × store × product, compared in integer units (cents, thousandths) | Sales, 1 Aug – 23 Sep: exact match in quantity and value for the retail stores, across a month boundary. Losses, 1 Aug – 24 Sep: quantity matches on every key except four, each traced to an extraction gap (a record deleted in the ERP after extraction, an entry back-dated past the watermark window) |
 | Every code has a description and every fact key finds its dimension | Gold gate checks per domain, fact-to-dimension keys and hierarchy names; dbt relationships tests | Gold QG (16 checks) |
 
 The two dbt warnings are intentional business monitors (offer anomalies), not technical failures.
@@ -272,11 +273,9 @@ Stated plainly, because a platform is only as trustworthy as its documented edge
 Planned work. Each step is validated with the same gates and fixtures before it is considered done.
 
 - **Freshness alert.** Failure emails only cover runs that start; add an alert for a daily run that never happened.
-- **Missing domains.** Extract the order-fulfilment type, stock entry/exit type, offer status and region tables, which the ERP has but the extraction does not bring; their codes return to Gold with descriptions.
 - **Narrower storage access.** Move control storage to an external volume so the service principal's file writes are scoped to it instead of the whole bucket.
-- **Accuracy.** Reconcile Gold against independent ERP totals (counts and financial measures), then reconnect Power BI to Gold.
 - **CI.** GitHub Actions running bundle validation for both targets, linting and PySpark unit tests over the `quality/` engines, so regressions are caught in the pull request instead of in the workspace.
-- **Extraction v2.** One daily load (the ERP is D+1 anyway), partitions keyed by business date and a `_SUCCESS` marker written by the extractor. Maturity becomes "the partition is marked complete", removing the dependency on clock time and timezone.
+- **Extraction v2.** One daily load (the ERP is D+1 anyway), partitions keyed by business date and a `_SUCCESS` marker written by the extractor. Maturity becomes "the partition is marked complete", removing the dependency on clock time and timezone. It also closes the two gaps the loss reconciliation traced: a lookback that re-reads recent days to catch back-dated entries, and capture of records deleted in the ERP after extraction.
 - **Data Vault integration layer (fiscal).** A small, auditable Data Vault beside the Star Schema, not replacing it: Hubs on business keys that cross systems (product EAN, supplier tax ID, invoice access key), Links for invoice items, and Satellites per source (ERP attributes vs. electronic-invoice XML) with `record_source` and hash-diff history. The goal is integrating a second source whose keys differ from the ERP, which is exactly where Data Vault earns its complexity.
 - **Performance, measured.** Liquid clustering declared in the Gold DDL benchmarked against the current layout, and fewer, coarser tasks per entity if the serverless overhead is confirmed as the dominant cost.
 
