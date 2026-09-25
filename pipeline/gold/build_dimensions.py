@@ -32,7 +32,12 @@ DIMENSOES = [
     "dim_produto",
     "dim_fornecedor",
     "dim_loja",
-    "dim_mercadologico",
+    "dim_mercadologico",   # referência da árvore; os nomes já estão achatados no dim_produto
+    "dim_tipo_pagamento",  # conformada: contas a pagar e outras despesas
+    "dim_tipo_entrada",
+    "dim_motivo_perda",
+    "dim_tipo_oferta",
+    "dim_promocao",
 ]
 
 for dim in DIMENSOES:
