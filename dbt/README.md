@@ -41,19 +41,19 @@ This is deliberate: declaring an externally built Gold table as a dbt model woul
 The project contains:
 
 - source-level generic tests for stable surrogate keys and safe non-null constraints;
+- `relationships` tests from fact keys to the domain and promotion dimensions (loss reason, offer type, promotion, payment type on both financial facts, entry type);
 - singular tests for calendar FK validity, SCD2 current-row consistency, zero-value sales with quantity, and pricing/margin anomaly monitoring.
 
 Known temporal gaps that are valid by design are **not** converted into generic `not_null` failures. For example, some historical facts legitimately retain a null temporal surrogate key when the business event predates the first defensible dimension version.
 
 ## Validation evidence
 
-Latest native Databricks dbt task in `dev`:
+Latest native Databricks dbt task in `dev` (star-schema conformance, 25/09/2026):
 
-- dbt Core: `1.12.3`
-- dbt-databricks adapter: `1.12.5`
-- Gold sources discovered: `14`
-- data tests discovered: `46`
-- result: **44 PASS / 2 WARN / 0 ERROR / 0 SKIP**
+- Gold sources discovered: `19` (9 facts, 9 dimensions and the merchandise-tree reference)
+- data tests discovered: `63` (57 generic, 6 singular)
+- result: **61 PASS / 2 WARN / 0 ERROR / 0 SKIP**
+- first validated with dbt Core `1.12.3` and dbt-databricks `1.12.5`; the job pins `dbt-databricks>=1.8.0,<2.0.0`
 - no dbt deprecation warnings after moving source metadata to `config.meta`
 
 The two warnings are intentional business-anomaly monitors:

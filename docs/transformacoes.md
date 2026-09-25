@@ -1,7 +1,7 @@
 # Transformações — Varejinho Data Platform
 
 > **Autora:** Zara Louise  
-> **Versão:** 1.2 — Setembro 2026  
+> **Versão:** 1.3 — Setembro 2026  
 > **Repositório:** github.com/zaraluz/varejinho-data-platform
 
 Este documento descreve as transformações aplicadas em cada camada da plataforma de dados do Grupo Varejinho, do dado bruto até o modelo dimensional consumido pelo Power BI.
@@ -18,9 +18,15 @@ Este documento descreve as transformações aplicadas em cada camada da platafor
 
 **Regra fundamental:** Bronze particiona por quando o dado chegou (`ingestion_date`). Silver e Gold particionam por quando o evento aconteceu. Isso resolve o problema original: registros do último dia do mês eram perdidos quando o job virava de mês, porque a partição era por mês corrente.
 
-**Cast de decimais:** o ERP grava decimais com vírgula (`3,14`). Toda coluna numérica passa por `regexp_replace(col, ',', '.')` antes do cast para `DECIMAL(14,3)`.
+**Cast de decimais:** o ERP grava decimais com vírgula (`3,14`). As colunas numéricas declaradas na configuração de cada entidade passam por `regexp_replace(col, ',', '.')` antes do cast para `DECIMAL(14,3)` (`valortotal` da venda usa `DECIMAL(14,2)`). Coluna não declarada continua STRING: cada seção abaixo lista o que é tipado e o que ainda chega como texto.
 
 **Cast de timestamps:** o ERP grava datas no formato `yyyy/MM/dd HH:mm:ss.SSS`. Para colunas nullable usa-se `try_to_timestamp` para retornar NULL em vez de erro.
+
+**Surrogate keys por hash:** fatos e versões SCD2 usam `md5(concat_ws('||', coalesce(CAST(a AS STRING), '<NULL>'), coalesce(CAST(b AS STRING), '<NULL>')))`, abreviado nas tabelas abaixo como `MD5(a || b)`. O sentinela `'<NULL>'` existe porque `concat_ws` descarta NULL: sem ele, `(NULL, '12')` e `('12', NULL)` gerariam o mesmo hash. É o mesmo tratamento do hash de versão SCD2 da Silver.
+
+**Chaves comuns a todo fato:** `sk_loja` (= `id_loja`, liga em `dim_loja`) e `sk_tempo` (`yyyyMMdd` da data de negócio, liga em `dim_tempo`). Dimensões de domínio usam o próprio id do ERP como SK.
+
+**Todo código na Gold tem descrição.** Domínio compartilhado entre fatos, ou com atributos úteis, vira dimensão (conformada quando compartilhada); código de status único do fato vira texto no próprio fato; código cujo domínio o ERP não entrega fica fora da Gold e continua na Silver. Nenhum rótulo é inventado.
 
 ---
 
@@ -330,7 +336,8 @@ Este documento descreve as transformações aplicadas em cada camada da platafor
 
 | Transformação | Detalhe |
 |---|---|
-| Cast decimal | `quantidade`, `valor`, `custocomimposto`, `custosemimposto`, `customediocomimposto`, `customediosemimposto`, `valorpis`, `valorcofins`, `valoripi`, `valoricmssubstituicao`, `valorbasepiscofins` |
+| Cast decimal | `quantidade` |
+| Ainda STRING | `custocomimposto`, `custosemimposto`, `customediocomimposto`, `customediosemimposto`, `valorpis`, `valorcofins`, `valoripi`, `valoricmssubstituicao`, `valorbasepiscofins` |
 | Cast timestamp | `data` |
 | Chave de dedup | `id` |
 | Partição | `ano`, `mes` |
@@ -341,7 +348,8 @@ Este documento descreve as transformações aplicadas em cada camada da platafor
 |---|---|
 | Grão | 1 linha por registro de perda |
 | SK | `MD5(id \|\| id_loja)` |
-| Join dim_produto | LEFT JOIN temporal |
+| Join dim_produto | LEFT JOIN temporal pela `data` |
+| Motivo | `sk_motivo_perda` → `dim_motivo_perda` |
 | Colunas excluídas | `id_notasaida`, `emitenota`, `id_aliquota`, `id_tipopiscofins` |
 | Partição | `ano`, `mes` |
 
@@ -390,7 +398,9 @@ Este documento descreve as transformações aplicadas em cada camada da platafor
 | Grão | 1 linha por movimentação de estoque |
 | SK | `MD5(id \|\| id_loja)` |
 | Coluna calculada | `variacao_estoque = estoqueatual - estoqueanterior` |
-| Join dim_produto | LEFT JOIN temporal |
+| Join dim_produto | LEFT JOIN temporal pela `datamovimento` |
+| Tipo de movimentação | `tipo_movimentacao` por extenso (`tipomovimentacao`); `id_tipoentradasaida` fica fora: o domínio não é extraído do ERP |
+| Regra de agregação | `quantidade` e `variacao_estoque` somam; `estoqueanterior` e `estoqueatual` são saldos (semiaditivos): não somar ao longo do tempo |
 | Colunas excluídas | `datahora`, `id_usuario` |
 | Partição | `ano`, `mes` |
 
@@ -470,9 +480,11 @@ Este documento descreve as transformações aplicadas em cada camada da platafor
 
 | Decisão | Detalhe |
 |---|---|
-| Grão | 1 linha por produto em promoção |
-| SK | `MD5(id_promocaoitem \|\| id_loja)` |
-| Join dim_produto | LEFT JOIN `is_current = true` — versão atual, não temporal |
+| Grão | 1 linha por produto em promoção (item) |
+| SK | `sk_promocao_item` = `MD5(id_promocaoitem \|\| id_loja)` |
+| Cabeçalho | `sk_promocao` → `dim_promocao`. Valor, desconto e quantidade mínima são atributos da dimensão: repetidos em cada item, somariam o valor da promoção uma vez por item |
+| Métrica | `preco_promocional` (`precovenda` do item) |
+| Join dim_produto | LEFT JOIN temporal pela `datainicio` do cabeçalho |
 | Colunas excluídas | `controle`, `verificaprodutosauditados`, `desconsideraritem`, `diasexpiracao` |
 | Partição | `ano`, `mes` |
 
@@ -527,6 +539,8 @@ Este documento descreve as transformações aplicadas em cada camada da platafor
 | Colunas calculadas | `desconto_valor = preconormal - precooferta`, `desconto_percentual` |
 | Join dim_produto | LEFT JOIN temporal |
 | Sinal analítico | `desconto_valor < 0` → margem negativa em oferta |
+| Tipo de oferta | `sk_tipo_oferta` → `dim_tipo_oferta`; `id_situacaooferta` fica fora: o domínio não é extraído do ERP |
+| Regra de agregação | `desconto_percentual` não é aditivo: recalcular a partir das somas de `preconormal` e `precooferta`, nunca somar nem tirar média simples |
 | Colunas excluídas | `controle`, `encerraofertaitens`, `bloquearvendaitens`, `enviaconnect`, `aplicapercentualprecoassociado` |
 | Partição | `ano`, `mes` |
 
@@ -571,6 +585,7 @@ Este documento descreve as transformações aplicadas em cada camada da platafor
 | Transformação | Detalhe |
 |---|---|
 | Cast timestamp | `datacompra` |
+| Ainda STRING | `dataentrega` |
 | Chave de dedup | `id` |
 | Partição | `ano`, `mes` |
 
@@ -611,6 +626,7 @@ Este documento descreve as transformações aplicadas em cada camada da platafor
 | Transformação | Detalhe |
 |---|---|
 | Cast decimal | `quantidade`, `custocompra`, `valortotal` |
+| Ainda STRING | `quantidadeatendida`, `qtdembalagem`, `custofinal`, `desconto`, `valorfrete`, `valorrebaixa`, `verbavalor`, `custoverba`, `quantidadebonificadorebaixa` |
 | Chave de dedup | `id` |
 | Sem partição | Sem coluna de data própria |
 
@@ -621,8 +637,9 @@ Este documento descreve as transformações aplicadas em cada camada da platafor
 | Grão | 1 linha por item de pedido de compra |
 | SK | `MD5(id_pedidoitem \|\| id_loja)` |
 | Join pedido | INNER JOIN — todo item tem obrigatoriamente um cabeçalho |
-| Join dim_produto | LEFT JOIN `is_current = true` |
-| Join dim_fornecedor | LEFT JOIN `is_current = true` |
+| Join dim_produto | LEFT JOIN temporal pela `datacompra` do pedido |
+| Join dim_fornecedor | LEFT JOIN temporal pela `datacompra` do pedido |
+| Situação | `situacao_pedido` por extenso (`situacaopedido`); `id_tipoatendidopedido` fica fora: o domínio não é extraído do ERP |
 | Colunas excluídas | `email`, `id_usuario`, `gerousugestao`, `justificativapedidosemagenda` |
 | Partição | `ano`, `mes` do `pedido` |
 
@@ -711,7 +728,10 @@ Este documento descreve as transformações aplicadas em cada camada da platafor
 | Grão | 1 linha por parcela de pagamento a fornecedor |
 | SK | `MD5(id_parcela \|\| id_loja)` |
 | Join cabeçalho | INNER JOIN com `pagarfornecedor` |
-| Join dim_fornecedor | LEFT JOIN `is_current = true` |
+| Join dim_fornecedor | LEFT JOIN temporal pela `dataemissao` do documento |
+| Tipo de pagamento | `sk_tipo_pagamento` → `dim_tipo_pagamento`, conformada com `fato_outras_despesas` |
+| Situação | `situacao_parcela` por extenso (`situacaopagarfornecedorparcela`) |
+| Datas em dois papéis | `sk_tempo_vencimento` e `sk_tempo_pagamento` ligam na mesma `dim_tempo` (role-playing) |
 | Colunas nullable | `sk_tempo_pagamento`, `datapagamento` — NULL para parcelas não pagas |
 | Colunas excluídas | `id_conciliacaobancarialancamento`, `id_contacontabilfinanceiro`, `id_favorecido`, `exportado` |
 | Partição | `ano`, `mes` do vencimento |
@@ -759,7 +779,10 @@ Este documento descreve as transformações aplicadas em cada camada da platafor
 |---|---|
 | Grão | 1 linha por despesa operacional |
 | SK | `MD5(id \|\| id_loja)` |
-| Join dim_fornecedor | LEFT JOIN `is_current = true` — nullable |
+| Join dim_fornecedor | LEFT JOIN temporal pela `dataemissao` — nullable, fornecedor é opcional |
+| Tipo de pagamento | `sk_tipo_pagamento` → `dim_tipo_pagamento` (conformada) |
+| Tipo de entrada | `sk_tipo_entrada` → `dim_tipo_entrada` |
+| Situação | `situacao_despesa` por extenso (`situacaopagaroutrasdespesas`) |
 | Colunas excluídas | `pendenciaworkflow`, `id_abastecimento`, `id_tiposervico`, `datahoraalteracao` |
 | Partição | `ano`, `mes` |
 
@@ -888,7 +911,9 @@ Este documento descreve as transformações aplicadas em cada camada da platafor
 | Decisão | Detalhe |
 |---|---|
 | SK | `MD5(id \|\| valid_from)` — identifica unicamente cada versão |
-| Colunas incluídas | `descricao_completa/reduzida`, `ncm`, hierarquia mercadológica, `id_tipoembalagem`, `id_tipomercadoria`, `datacadastro`, `dataalteracao`, controle SCD2 |
+| Hierarquia achatada | `secao`, `grupo`, `subgrupo` (códigos, Type 2 por versão) + `secao_nome`, `grupo_nome`, `subgrupo_nome` da árvore atual (a descrição é Type 1). O Gold QG falha se um caminho ficar sem nome |
+| Tipos por extenso | `tipo_embalagem`, `tipo_mercadoria` |
+| Colunas incluídas | `descricao_completa/reduzida`, `ncm`, `pesoliquido`, `pesobruto`, `datacadastro`, `dataalteracao`, controle SCD2 |
 | Colunas excluídas | Atributos fiscais, flags operacionais, dimensões físicas de embalagem |
 
 ---
@@ -1034,6 +1059,7 @@ Este documento descreve as transformações aplicadas em cada camada da platafor
 | Colunas monitoradas SCD2 | `descricao`, `mercadologico1/2/3`, `nivel` |
 | valid_from | `DATE '2020-01-01'` — sem `datacadastro` no ERP |
 | Colunas excluídas na Gold | `mercadologico4/5`, `id_centrocusto`, `descricaolojavirtual` |
+| Papel na Gold | `dim_mercadologico` é a referência da árvore (inclui subgrupos sem produto); os nomes que o BI filtra vêm achatados em `dim_produto` |
 
 ---
 
@@ -1063,8 +1089,8 @@ Este documento descreve as transformações aplicadas em cada camada da platafor
 | Decisão | Detalhe |
 |---|---|
 | SK | `id_loja` — estável, sem SCD2 |
-| Colunas incluídas | `descricao`, `id_regiao`, `lojavirtual`, `atacado` |
-| Colunas excluídas | `id_fornecedor`, `nomeservidor`, `servidorcentral`, `geraconcentrador`, `estoqueterceiro`, `id_situacaocadastro` |
+| Colunas incluídas | `descricao` (como `nome_loja`), `lojavirtual`, `atacado` |
+| Colunas excluídas | `id_regiao` (valor único; domínio não extraído), `id_fornecedor`, `nomeservidor`, `servidorcentral`, `geraconcentrador`, `estoqueterceiro`, `id_situacaocadastro` |
 
 ---
 
@@ -1137,34 +1163,57 @@ Não extraída do ERP — gerada no Databricks via `sequence()`.
 |---|---|
 | Grão | 1 linha por produto/loja/snapshot_date |
 | SK | `MD5(id_produto \|\| id_loja \|\| snapshot_date)` |
-| Join dim_produto | LEFT JOIN temporal |
+| Join dim_produto | LEFT JOIN temporal pela `snapshot_date` |
+| Classe ABC | 8 colunas por extenso (`curva_geral_nivel1` … `curva_subgrupo_nivel2`) por um mapa código → letra de `tipocurvaabc`: 8 papéis de um domínio minúsculo viram texto no fato em vez de 8 relacionamentos. O Gold QG falha se um código ficar sem letra |
+| Regra de agregação | `quantidade`, `valortotal` e `lucro` são o estado de cada snapshot: não somar entre `snapshot_date` diferentes |
 | Partição | `snapshot_date` |
+
+---
+
+## Dimensões de domínio e de promoção (Gold)
+
+| Dimensão | Origem (Silver) | SK | Atributos | Usada por |
+|---|---|---|---|---|
+| `dim_tipo_pagamento` | `tipopagamento` | `CAST(id AS INT)` | `tipo_pagamento`, `banco`, `cheque`, `boleto`, `docted`, `debitocc`, `quantidadedias` | `fato_contas_pagar`, `fato_outras_despesas` (conformada) |
+| `dim_tipo_entrada` | `tipoentrada` | `CAST(id AS INT)` | `tipo_entrada`, `tipo`, `bonificacao`, `ativoimobilizado`, `foraestado`, `notaprodutor` | `fato_outras_despesas` |
+| `dim_motivo_perda` | `tipomotivoperda` | `CAST(id AS INT)` | `motivo_perda`, `emitenota` | `fato_perdas` |
+| `dim_tipo_oferta` | `tipooferta` | `CAST(id AS INT)` | `tipo_oferta`, `prioridade`, `desconsiderarofertavendamedia`, `scanntech` | `fato_oferta` |
+| `dim_promocao` | `promocao` + `tipopromocao` + `situacaocadastro` | `CAST(id AS BIGINT)` | `descricao_promocao`, `tipo_promocao`, `situacao_promocao`, `datainicio`, `datatermino`, `valor_promocao`, `valor_desconto`, `quantidade_minima`, `aplicatodos`, `somenteclubevantagens` | `fato_promocoes` |
+
+As colunas contábeis e fiscais desses domínios ficam na Silver: não servem para cortar os fatos.
 
 ---
 
 ## Domínios (SCD Tipo 1)
 
-FULL LOAD + overwrite diário. Sem fato correspondente na Gold.
+FULL LOAD + overwrite diário na Silver. Na Gold, cada domínio entra de uma forma:
 
-| Tabela | Colunas Bronze | Linhas |
+| Forma na Gold | Quando | Domínios |
 |---|---|---|
-| `tipocurvaabc` | id, descricao, ingestion_date | 3 |
-| `tipomotivoperda` | id, descricao, id_situacaocadastro, emitenota + 13 cols contábeis, ingestion_date | 22 |
-| `tipopedido` | id, descricao, ingestion_date | 2 |
-| `tipopromocao` | id, descricao, ingestion_date | 2 |
-| `tipoembalagem` | id, descricao, descricaocompleta, ingestion_date | 16 |
-| `tipoentrada` | id, descricao, tipo + 47 cols fiscais/contábeis, ingestion_date | 277 |
-| `tipofornecedor` | id, descricao, ingestion_date | 4 |
-| `tipomercadoria` | id, descricao, referencia, ingestion_date | 504 |
-| `tipomovimentacao` | id, descricao, ingestion_date | 36 |
-| `tipooferta` | id, descricao, id_situacaocadastro, prioridade, desconsiderarofertavendamedia, scanntech, ingestion_date | 53 |
-| `tipopagamento` | id, descricao, banco, cheque, quantidadedias, boleto, docted, debitocc, ingestion_date | 11 |
-| `tipoplanoconta` | id, planoconta1, planoconta2, nivel, descricao, ingestion_date | 19 |
-| `situacaocadastro` | id, descricao, ingestion_date | 2 |
-| `situacaonotaentrada` | id, descricao, ingestion_date | 2 |
-| `situacaopagarfornecedorparcela` | id, descricao, ingestion_date | 2 |
-| `situacaopagaroutrasdespesas` | id, descricao, ingestion_date | 2 |
-| `situacaopedido` | id, descricao, ingestion_date | 3 |
+| Dimensão própria | compartilhado entre fatos ou com atributos úteis | `tipopagamento`, `tipoentrada`, `tipomotivoperda`, `tipooferta`; `tipopromocao` e `situacaocadastro` dentro de `dim_promocao` |
+| Texto no fato | código de status único do fato | `situacaopedido`, `situacaopagarfornecedorparcela`, `situacaopagaroutrasdespesas`, `tipomovimentacao`, `tipocurvaabc` |
+| Atributo de outra dimensão | descreve a entidade, não o evento | `tipoembalagem`, `tipomercadoria` → `dim_produto` |
+| Só Silver | sem uso na Gold atual | `tipopedido`, `tipofornecedor`, `tipoplanoconta`, `situacaonotaentrada` |
+
+| Tabela | Colunas Bronze |
+|---|---|
+| `tipocurvaabc` | id, descricao, ingestion_date |
+| `tipomotivoperda` | id, descricao, id_situacaocadastro, emitenota + 13 cols contábeis, ingestion_date |
+| `tipopedido` | id, descricao, ingestion_date |
+| `tipopromocao` | id, descricao, ingestion_date |
+| `tipoembalagem` | id, descricao, descricaocompleta, ingestion_date |
+| `tipoentrada` | id, descricao, tipo + 47 cols fiscais/contábeis, ingestion_date |
+| `tipofornecedor` | id, descricao, ingestion_date |
+| `tipomercadoria` | id, descricao, referencia, ingestion_date |
+| `tipomovimentacao` | id, descricao, ingestion_date |
+| `tipooferta` | id, descricao, id_situacaocadastro, prioridade, desconsiderarofertavendamedia, scanntech, ingestion_date |
+| `tipopagamento` | id, descricao, banco, cheque, quantidadedias, boleto, docted, debitocc, ingestion_date |
+| `tipoplanoconta` | id, planoconta1, planoconta2, nivel, descricao, ingestion_date |
+| `situacaocadastro` | id, descricao, ingestion_date |
+| `situacaonotaentrada` | id, descricao, ingestion_date |
+| `situacaopagarfornecedorparcela` | id, descricao, ingestion_date |
+| `situacaopagaroutrasdespesas` | id, descricao, ingestion_date |
+| `situacaopedido` | id, descricao, ingestion_date |
 
 ---
 
