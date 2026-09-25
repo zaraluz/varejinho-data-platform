@@ -269,7 +269,7 @@ check("fato_movimento_estoque — volumetria", gold >= silver * 0.99,
 
 # ── fato_promocoes ───────────────────────────────────────────
 df = spark.table(f"{CATALOG}.gold.fato_promocoes")
-dupes = df.groupBy("sk_promocao").count().filter("count > 1").count()
+dupes = df.groupBy("sk_promocao_item").count().filter("count > 1").count()
 check("fato_promocoes — SK única", dupes == 0, f"({dupes} duplicatas)")
 
 promocaoitem = spark.table(f"{CATALOG}.silver.promocaoitem").alias("pi")
@@ -336,7 +336,7 @@ check_temporal_mapping(
 
 silver_total = parcela.count()
 eligible_keys = contas_src.select("id_parcela", "id_loja").distinct()
-gold_keys = df.select("id_parcela", "id_loja").distinct()
+gold_keys = df.select("id_parcela", F.col("sk_loja").alias("id_loja")).distinct()
 
 eligible = eligible_keys.count()
 gold = gold_keys.count()
@@ -456,6 +456,11 @@ for dim, chave in [
     ("dim_mercadologico","sk_mercadologico"),
     ("dim_loja",         "sk_loja"),
     ("dim_tempo",        "sk_tempo"),
+    ("dim_tipo_pagamento", "sk_tipo_pagamento"),
+    ("dim_tipo_entrada", "sk_tipo_entrada"),
+    ("dim_motivo_perda", "sk_motivo_perda"),
+    ("dim_tipo_oferta",  "sk_tipo_oferta"),
+    ("dim_promocao",     "sk_promocao"),
 ]:
     df = spark.table(f"{CATALOG}.gold.{dim}")
     dupes = df.groupBy(chave).count().filter("count > 1").count()
@@ -467,6 +472,85 @@ multi_current = (spark.table(f"{CATALOG}.gold.dim_produto")
     .filter("count > 1").count())
 check("dim_produto — no máximo 1 versão atual por produto",
       multi_current == 0, f"({multi_current} com múltiplas versões ativas)")
+
+# ── star schema: domínios, chaves e hierarquia ──────────────
+# O BI lê só a Gold. Cada código de domínio virou uma chave para uma dimensão ou
+# uma descrição no fato; estas checagens garantem que nenhum código ficou sem
+# descrição e que toda chave de fato encontra a sua dimensão.
+
+
+def check_dominio(nome, fonte, coluna, dominio):
+    """Todo código não nulo da fonte Silver existe no domínio (senão a descrição sairia nula)."""
+    ids = spark.table(f"{CATALOG}.silver.{dominio}").select(F.col("id").cast("int").alias("_id"))
+    orfaos = (
+        fonte.filter(F.col(coluna).isNotNull())
+        .join(ids, F.col(coluna).cast("int") == F.col("_id"), "left_anti")
+        .count()
+    )
+    check(f"{nome} — todo código tem descrição", orfaos == 0,
+          f"({orfaos} linha(s) com código sem descrição em {dominio})")
+
+
+def check_fk(fato, coluna, dim, chave):
+    """Toda chave não nula do fato existe na dimensão da Gold."""
+    dim_keys = spark.table(f"{CATALOG}.gold.{dim}").select(F.col(chave).alias("_k"))
+    orfaos = (
+        spark.table(f"{CATALOG}.gold.{fato}")
+        .filter(F.col(coluna).isNotNull())
+        .join(dim_keys, F.col(coluna) == F.col("_k"), "left_anti")
+        .count()
+    )
+    check(f"{fato}.{coluna} → {dim}", orfaos == 0, f"({orfaos} chave(s) sem dimensão)")
+
+
+silver_t = lambda t: spark.table(f"{CATALOG}.silver.{t}")
+
+# Descrições gravadas no próprio fato ou na dimensão
+check_dominio("fato_compras.situacao_pedido", silver_t("pedido"), "id_situacaopedido", "situacaopedido")
+check_dominio("fato_contas_pagar.situacao_parcela", silver_t("pagarfornecedorparcela"),
+              "id_situacaopagarfornecedorparcela", "situacaopagarfornecedorparcela")
+check_dominio("fato_movimento_estoque.tipo_movimentacao", silver_t("logestoque"),
+              "id_tipomovimentacao", "tipomovimentacao")
+check_dominio("fato_outras_despesas.situacao_despesa", silver_t("pagaroutrasdespesas"),
+              "id_situacaopagaroutrasdespesas", "situacaopagaroutrasdespesas")
+check_dominio("dim_produto.tipo_embalagem", silver_t("produto"), "id_tipoembalagem", "tipoembalagem")
+check_dominio("dim_produto.tipo_mercadoria", silver_t("produto"), "id_tipomercadoria", "tipomercadoria")
+check_dominio("dim_promocao.tipo_promocao", silver_t("promocao"), "id_tipopromocao", "tipopromocao")
+check_dominio("dim_promocao.situacao_promocao", silver_t("promocao"), "id_situacaocadastro", "situacaocadastro")
+
+# Curva ABC: 8 colunas do mesmo domínio de 3 letras, numa checagem só
+curva = silver_t("curvaabc")
+letras = silver_t("tipocurvaabc").select(F.col("id").cast("int").alias("_id"))
+colunas_curva = [c for c in curva.columns if c.startswith("id_tipocurvaabc") and "mercadologico4" not in c
+                 and "mercadologico5" not in c]
+sem_letra = 0
+for c in colunas_curva:
+    sem_letra += (curva.filter(F.col(c).isNotNull())
+                  .join(letras, F.col(c).cast("int") == F.col("_id"), "left_anti").count())
+check("fato_curva_abc — toda classe tem letra", sem_letra == 0,
+      f"({sem_letra} valor(es) sem letra em {len(colunas_curva)} colunas)")
+
+# Chaves dos fatos para as dimensões novas
+check_fk("fato_contas_pagar",    "sk_tipo_pagamento", "dim_tipo_pagamento", "sk_tipo_pagamento")
+check_fk("fato_outras_despesas", "sk_tipo_pagamento", "dim_tipo_pagamento", "sk_tipo_pagamento")
+check_fk("fato_outras_despesas", "sk_tipo_entrada",   "dim_tipo_entrada",   "sk_tipo_entrada")
+check_fk("fato_perdas",          "sk_motivo_perda",   "dim_motivo_perda",   "sk_motivo_perda")
+check_fk("fato_oferta",          "sk_tipo_oferta",    "dim_tipo_oferta",    "sk_tipo_oferta")
+check_fk("fato_promocoes",       "sk_promocao",       "dim_promocao",       "sk_promocao")
+
+# Hierarquia achatada: a suposição que simplificou o join (todo caminho existe na
+# árvore atual) vira checagem. Se um caminho sumir, o gate falha em vez de gravar nome nulo.
+sem_nome = (
+    spark.table(f"{CATALOG}.gold.dim_produto")
+    .filter(
+        (F.col("secao").isNotNull() & F.col("secao_nome").isNull())
+        | (F.col("grupo").isNotNull() & F.col("grupo_nome").isNull())
+        | (F.col("subgrupo").isNotNull() & F.col("subgrupo_nome").isNull())
+    )
+    .count()
+)
+check("dim_produto — todo caminho mercadológico tem nome", sem_nome == 0,
+      f"({sem_nome} versão(ões) de produto sem nome de seção/grupo/subgrupo)")
 
 print(f"\n=== GOLD QUALITY GATE [{CATALOG}] ===\n")
 for r in resultados:
