@@ -19,6 +19,10 @@ targets:
               default: ${workspace.file_path}
             - name: control_root
               default: ${var.control_root}/r2_partition_manifest_fixture
+            # Bronze simulada: tabela externa, que o Unity Catalog não aceita sobre
+            # caminho de volume. Fica num prefixo do bucket fora de qualquer volume.
+            - name: source_root
+              default: s3://varejinho-lake/_fixtures/dev/r2_partition_manifest_source
           tasks:
             - task_key: fixture_partition_manifest
               notebook_task:

@@ -50,6 +50,8 @@ Between steps 9 and 10 a scheduled run still works: the deployed code uses the `
 
 Least privilege cannot be proven in dev, where jobs run as the operator with full rights. Step 13 is the proof.
 
+A volume holds files, never tables: Unity Catalog refuses a table defined on a volume path (`Missing cloud file system scheme`). The R2 fixture simulates Bronze with an external table, so its source files live under `s3://varejinho-lake/_fixtures/dev/`, outside any volume; only the manifests under test stay in the control volume.
+
 ## Rollback
 
 - Dev, before step 8: the old root is intact. Point `control_root` back to it and redeploy.
