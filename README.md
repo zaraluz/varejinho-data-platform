@@ -74,7 +74,7 @@ flowchart LR
     PDI --> RAW --> BR
     CP -.enforces.-> SI
     CTL <-.-> CP
-    GO --> BI["Power BI<br/>(reconnection after<br/>ERP × Gold reconciliation)"]
+    GO --> BI["Power BI<br/>(reconnection to Gold next)"]
 ```
 
 **Layer responsibilities.** Bronze preserves the raw source exactly and exposes file metadata. Silver turns it into a trustworthy interface: types, grain, deduplication, contracts, quarantine and history. Gold serves analytics: a star schema whose facts carry the dimension version valid at the business date of each event.
@@ -127,7 +127,7 @@ Each guarantee has a mechanism in the runtime and an isolated fixture that prove
 | A schema change is a decision, not a side effect | Drift is detected and classified; baselines change only through explicit promotion | S2 6/6, 37/37 baselines audited exact vs. Silver |
 | The pipeline cannot stall silently | Timeliness check: committed watermark at most 2 days behind the business date | Silver QG (14 checks) |
 | Gold is correct and consistent | Gold quality gate + dbt source tests | Gold QG 73/73, dbt 61 pass / 2 warn / 0 error |
-| Gold agrees with the ERP's own reports | Top-down reconciliation against ERP reports: period × store, then day × store × product, compared in integer units (cents, thousandths) | Sales, 1 Aug – 23 Sep: exact match in quantity and value for the retail stores, across a month boundary. Losses, 1 Aug – 24 Sep: quantity matches on every key except four, each traced to an extraction gap (a record deleted in the ERP after extraction, an entry back-dated past the watermark window) |
+| Gold agrees with the ERP's own reports | Top-down reconciliation against the ERP's reports and source tables: period × location, then down to the day and the item, compared in integer units (cents, thousandths) | Sales, purchases, losses and accounts payable reconciled for every store and the distribution center, Aug–Sep 2026. Sales match exactly in quantity and value, across a month boundary. The only residuals are four loss records, each traced to an extraction gap (a record deleted in the ERP after extraction, an entry back-dated past the watermark window) |
 | Every code has a description and every fact key finds its dimension | Gold gate checks per domain, fact-to-dimension keys and hierarchy names; dbt relationships tests | Gold QG (16 checks) |
 
 The two dbt warnings are intentional business monitors (offer anomalies), not technical failures.
