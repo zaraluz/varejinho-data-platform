@@ -1,6 +1,8 @@
 -- pipeline/gold/fato_promocoes.sql
--- Grão: 1 linha por produto em promoção
--- SK: MD5(id_promocaoitem || id_loja)
+-- Grão: 1 linha por produto em promoção (item)
+-- SK do fato: sk_promocao_item = MD5(id_promocaoitem || id_loja)
+-- Cabeçalho da promoção (descrição, tipo, situação, datas, valor, desconto, quantidade
+-- mínima) fica em dim_promocao: aqui ele se repetiria em cada item e somaria errado.
 -- Join temporal com dim_produto pela data de início da promoção
 -- Partição: ano/mes da data de início da promoção
 -- Full load na Silver — inclui promoções futuras
@@ -11,31 +13,19 @@ PARTITIONED BY (ano, mes)
 AS
 SELECT
     -- Surrogate key do fato
-    md5(concat_ws('||', CAST(pi.id AS STRING), CAST(pr.id_loja AS STRING))) AS sk_promocao,
+    md5(concat_ws('||', CAST(pi.id AS STRING), CAST(pr.id_loja AS STRING))) AS sk_promocao_item,
 
     -- Chaves estrangeiras
+    CAST(pi.id_promocao AS BIGINT)                                          AS sk_promocao,
     p.sk_produto,
-    pr.id_loja,
+    pr.id_loja                  AS sk_loja,
     CAST(date_format(pr.datainicio, 'yyyyMMdd') AS INT)                     AS sk_tempo,
-    pr.id_tipopromocao,
-    pr.id_situacaocadastro,
 
     -- Chaves naturais
     pi.id                       AS id_promocaoitem,
-    pi.id_promocao,
 
-    -- Métricas da promoção
+    -- Métrica do item
     pi.precovenda               AS preco_promocional,
-    pr.valor                    AS valor_promocao,
-    pr.valordesconto,
-    pr.quantidade               AS quantidade_minima,
-
-    -- Atributos do cabeçalho
-    pr.datainicio,
-    pr.datatermino,
-    pr.descricao                AS descricao_promocao,
-    pr.aplicatodos,
-    pr.somenteclubevantagens,
 
     -- Particionamento — herdado do cabeçalho
     pr.ano,

@@ -3,22 +3,27 @@
 -- SK: MD5(id || id_loja)
 -- Join temporal com dim_fornecedor pela data de emissão (quando houver fornecedor)
 -- Partição: ano/mes da emissão
+-- Situação por extenso; tipo de pagamento → dim_tipo_pagamento (conformada); tipo de entrada → dim_tipo_entrada
 
 CREATE OR REPLACE TABLE varejinho.gold.fato_outras_despesas
 USING DELTA
 PARTITIONED BY (ano, mes)
 AS
+WITH situacao AS (
+    SELECT CAST(id AS INT) AS id, trim(descricao) AS descricao
+    FROM varejinho.silver.situacaopagaroutrasdespesas
+)
 SELECT
     -- Surrogate key do fato
     md5(concat_ws('||', CAST(od.id AS STRING), CAST(od.id_loja AS STRING))) AS sk_despesa,
 
     -- Chaves estrangeiras
     f.sk_fornecedor,
-    od.id_loja,
+    od.id_loja                  AS sk_loja,
     CAST(date_format(od.dataemissao, 'yyyyMMdd') AS INT)                    AS sk_tempo,
-    od.id_situacaopagaroutrasdespesas,
-    od.id_tipopagamento,
-    od.id_tipoentrada,
+    CAST(od.id_tipopagamento AS INT)                                        AS sk_tipo_pagamento,
+    CAST(od.id_tipoentrada   AS INT)                                        AS sk_tipo_entrada,
+    sd.descricao                AS situacao_despesa,
 
     -- Chave natural
     od.id                       AS id_despesa,
@@ -37,6 +42,9 @@ SELECT
     od.mes
 
 FROM varejinho.silver.pagaroutrasdespesas od
+
+LEFT JOIN situacao sd
+    ON sd.id = CAST(od.id_situacaopagaroutrasdespesas AS INT)
 
 -- Join temporal com dim_fornecedor pela emissão; permanece LEFT porque fornecedor é opcional
 LEFT JOIN varejinho.gold.dim_fornecedor f

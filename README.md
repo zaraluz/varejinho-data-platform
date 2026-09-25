@@ -59,8 +59,8 @@ flowchart LR
     subgraph DBX["Databricks · Unity Catalog"]
         BR["Bronze<br/>37 external tables<br/>(raw, read-only)"]
         SI["Silver · Delta<br/>14 incremental facts<br/>3 SCD2 dimensions<br/>20 reference entities"]
-        GO["Gold · Delta<br/>star schema · 9 facts<br/>4 dimensions + 1 outrigger<br/>point-in-time joins"]
-        DBT["dbt tests<br/>46 tests on 14 Gold sources"]
+        GO["Gold · Delta<br/>star schema · 9 facts<br/>9 dimensions<br/>point-in-time joins"]
+        DBT["dbt tests<br/>63 tests on 19 Gold sources"]
         BR --> SI --> GO --> DBT
     end
 
@@ -101,8 +101,8 @@ flowchart TB
     SQG["Silver quality gate · 113 checks<br/>maturity alignment · timeliness · contracts<br/>SCD2 invariants · quarantine · partition immutability"]
     GD["Gold dimensions<br/>one row per SCD2 version"]
     GF["Gold facts<br/>point-in-time joins"]
-    GQG["Gold quality gate · 52 checks<br/>temporal surrogate keys · reconciliation"]
-    DT["dbt test · 46 tests<br/>on the Gold built by this same run"]
+    GQG["Gold quality gate · 73 checks<br/>temporal surrogate keys · reconciliation<br/>descriptions · dimension keys"]
+    DT["dbt test · 63 tests<br/>on the Gold built by this same run"]
 
     BQ --> REF & SCD & FACTS
     REF & SCD & FACTS --> SQG --> GD --> GF --> GQG --> DT
@@ -126,7 +126,8 @@ Each guarantee has a mechanism in the runtime and an isolated fixture that prove
 | The Silver interface is enforced, not documented | One contract engine: structural breaks fail closed, bad rows go to quarantine, warnings never block | C3 7/7 |
 | A schema change is a decision, not a side effect | Drift is detected and classified; baselines change only through explicit promotion | S2 6/6, 37/37 baselines audited exact vs. Silver |
 | The pipeline cannot stall silently | Timeliness check: committed watermark at most 2 days behind the business date | Silver QG (14 checks) |
-| Gold is correct and consistent | Gold quality gate + dbt source tests | Gold QG 52/52, dbt 44 pass / 2 warn / 0 error |
+| Gold is correct and consistent | Gold quality gate + dbt source tests | Gold QG 73/73, dbt 61 pass / 2 warn / 0 error |
+| Every code has a description and every fact key finds its dimension | Gold gate checks per domain, fact-to-dimension keys and hierarchy names; dbt relationships tests | Gold QG (16 checks) |
 
 The two dbt warnings are intentional business monitors (offer anomalies), not technical failures.
 
@@ -154,9 +155,9 @@ The maturity rule compares dates in UTC. It holds today because the extractor's 
 
 ## Gold model
 
-Star schema built by PySpark/Spark SQL; dbt tests and documents it as external sources. Facts join four dimensions directly. The merchandise hierarchy (`dim_mercadologico`) is an outrigger: it is reached through the section, group and subgroup codes on `dim_produto`, so category names are one join further away.
+Star schema built by PySpark/Spark SQL; dbt tests and documents it as external sources. Every attribute used to filter or group is one hop from a fact, and nothing needs Silver. Four rules decide where each source code goes: an attribute of an entity that has a dimension is flattened into it; a domain that is shared, has attributes of its own or is an entity becomes a dimension; a single status code of one fact becomes a description in the fact; a code whose domain is not extracted is left out rather than labelled by guesswork. The rules and the measurements behind them are in the decision log.
 
-**Dimensions:** `dim_produto`, `dim_fornecedor`, `dim_mercadologico` (one row per SCD2 version, surrogate key = hash of id + `valid_from`), `dim_loja`, `dim_tempo` (one row per day).
+**Dimensions:** `dim_produto` and `dim_fornecedor` (one row per SCD2 version, surrogate key = hash of id + `valid_from`; `dim_produto` carries the merchandise hierarchy names, packaging type and goods type), `dim_loja`, `dim_tempo` (one row per day), `dim_tipo_pagamento` (conformed across accounts payable and other expenses), `dim_tipo_entrada`, `dim_motivo_perda`, `dim_tipo_oferta` and `dim_promocao` (the promotion header, whose value and discount would be double-counted if repeated on every item). `dim_mercadologico` stays as the reference for the merchandise tree, including subgroups without products.
 
 | Fact | Grain | Point-in-time join | Partitioning |
 |---|---|---|---|
@@ -271,7 +272,7 @@ Stated plainly, because a platform is only as trustworthy as its documented edge
 Planned work. Each step is validated with the same gates and fixtures before it is considered done.
 
 - **Freshness alert.** Failure emails only cover runs that start; add an alert for a daily run that never happened.
-- **Merchandise hierarchy.** Decide between flattening category names into `dim_produto` (one join per dimension for BI) and keeping the outrigger, before Power BI is reconnected.
+- **Missing domains.** Extract the order-fulfilment type, stock entry/exit type, offer status and region tables, which the ERP has but the extraction does not bring; their codes return to Gold with descriptions.
 - **Narrower storage access.** Move control storage to an external volume so the service principal's file writes are scoped to it instead of the whole bucket.
 - **Accuracy.** Reconcile Gold against independent ERP totals (counts and financial measures), then reconnect Power BI to Gold.
 - **CI.** GitHub Actions running bundle validation for both targets, linting and PySpark unit tests over the `quality/` engines, so regressions are caught in the pull request instead of in the workspace.

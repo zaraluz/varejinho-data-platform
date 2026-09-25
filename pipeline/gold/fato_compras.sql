@@ -3,11 +3,16 @@
 -- SK: MD5(id_pedidoitem || id_loja)
 -- Joins temporais com produto e fornecedor pela data da compra
 -- Partição: ano/mes da data de compra do pedido
+-- Situação do pedido vem por extenso (código de status único do fato).
+-- id_tipoatendidopedido fica fora da Gold: o domínio não é extraído do ERP.
 
 CREATE OR REPLACE TABLE varejinho.gold.fato_compras
 USING DELTA
 PARTITIONED BY (ano, mes)
 AS
+WITH situacao AS (
+    SELECT CAST(id AS INT) AS id, trim(descricao) AS descricao FROM varejinho.silver.situacaopedido
+)
 SELECT
     -- Surrogate key do fato
     md5(concat_ws('||', CAST(pi.id AS STRING), CAST(pi.id_loja AS STRING))) AS sk_compra,
@@ -15,7 +20,7 @@ SELECT
     -- Chaves estrangeiras
     p.sk_produto,
     f.sk_fornecedor,
-    pi.id_loja,
+    pi.id_loja                  AS sk_loja,
     CAST(date_format(pe.datacompra, 'yyyyMMdd') AS INT)                     AS sk_tempo,
 
     -- Chaves naturais
@@ -38,8 +43,7 @@ SELECT
     -- Atributos do cabeçalho do pedido
     pe.datacompra,
     pe.dataentrega,
-    pe.id_situacaopedido,
-    pe.id_tipoatendidopedido,
+    sp.descricao                AS situacao_pedido,
 
     -- Particionamento — herdado do pedido
     pe.ano,
@@ -50,6 +54,9 @@ FROM varejinho.silver.pedidoitem pi
 -- Join com cabeçalho do pedido
 JOIN varejinho.silver.pedido pe
     ON pi.id_pedido = pe.id
+
+LEFT JOIN situacao sp
+    ON sp.id = CAST(pe.id_situacaopedido AS INT)
 
 -- Join temporal com dim_produto — versão vigente na data da compra
 LEFT JOIN varejinho.gold.dim_produto p

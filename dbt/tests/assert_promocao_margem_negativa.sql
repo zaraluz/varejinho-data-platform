@@ -13,7 +13,7 @@ with custo_medio as (
 select
     p.id_promocaoitem,
     p.sk_produto,
-    p.id_loja,
+    p.sk_loja,
     p.preco_promocional,
     c.custo_medio,
     p.preco_promocional - c.custo_medio as margem_promocao
