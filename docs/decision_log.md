@@ -861,3 +861,23 @@ The runbook creates the group before the ownership step and names the deploy rol
 
 **Consequence**
 Activation counts as done after three consecutive green scheduled runs and the first weekly maintenance. Failure emails cover only runs that start; until a freshness alert exists, a morning glance at the run list covers a run that never started.
+
+## 2026-09-25 — Gold behaves as a star schema: every descriptive attribute is one hop from the fact
+
+**Decision**
+Every attribute used to filter or group Gold is reachable in one hop from a fact, without reading Silver. Four rules decide where each source code goes:
+1. An attribute of an entity that already has a dimension is flattened into that dimension: merchandise hierarchy names, packaging type and goods type go into `dim_produto`.
+2. A domain shared by facts, with attributes of its own, or that is an entity becomes a dimension: `dim_tipo_pagamento` (conformed across accounts payable and other expenses), `dim_tipo_entrada`, `dim_motivo_perda`, `dim_tipo_oferta` and `dim_promocao`.
+3. A single low-cardinality status code of one fact becomes a description in the fact: order, installment and expense status, movement type, and the ABC class letters.
+4. A code whose domain is not extracted is not labelled by guesswork: it leaves Gold (`id_tipoatendidopedido`, `id_tipoentradasaida`, `id_situacaooferta`) and stays in Silver. A code with a single value (`id_regiao`) leaves too.
+
+Facts name the store key `sk_loja`, as the dimension does.
+
+**Why**
+- The model was measured before deciding (dev): every domain code used by a fact had a description; the merchandise tree had no structural change in the observed window, every product path resolved to a current name, and no path was duplicated. The hierarchy is therefore flattened with a join to the current tree instead of a temporal join, and the Gold gate fails if a path ever stops resolving.
+- `fato_promocoes` repeated the promotion header's value, discount and minimum quantity on every item, so summing them multiplied by the number of items. They are now attributes of `dim_promocao`.
+- Junk dimensions were considered and not used: after the rules, no fact kept more than one status code, and the remaining flags are self-describing booleans.
+- No consumer reads Gold yet (Power BI reconnects after this change), which makes this the cheapest moment to change Gold's contract.
+
+**Consequence**
+`dim_mercadologico` stays as the reference for the tree, including subgroups without products. Flattened hierarchy names are Type 1; the path of each product version stays Type 2 in `dim_produto`. The Gold quality gate gains checks for descriptions, fact-to-dimension keys and hierarchy names; dbt gains relationships tests; weekly maintenance covers the new dimensions.
