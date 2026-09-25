@@ -14,7 +14,7 @@ with custo_medio AS (
 select
     o.id_oferta,
     o.sk_produto,
-    o.id_loja,
+    o.sk_loja,
     o.precooferta,
     o.preconormal,
     c.custo_medio,
