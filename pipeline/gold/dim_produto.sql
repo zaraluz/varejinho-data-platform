@@ -23,7 +23,7 @@ mercadoria AS (
     SELECT CAST(id AS INT) AS id, trim(descricao) AS descricao FROM varejinho.silver.tipomercadoria
 )
 SELECT
-    md5(concat_ws('||', CAST(p.id AS STRING), CAST(p.valid_from AS STRING))) AS sk_produto,
+    md5(concat_ws('||', coalesce(CAST(p.id AS STRING), '<NULL>'), coalesce(CAST(p.valid_from AS STRING), '<NULL>'))) AS sk_produto,
     p.id                        AS id_produto,
     p.descricaocompleta         AS descricao_completa,
     p.descricaoreduzida         AS descricao_reduzida,

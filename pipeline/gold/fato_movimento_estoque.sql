@@ -14,7 +14,7 @@ WITH tipo AS (
     SELECT CAST(id AS INT) AS id, trim(descricao) AS descricao FROM varejinho.silver.tipomovimentacao
 )
 SELECT
-    md5(concat_ws('||', CAST(le.id AS STRING), CAST(le.id_loja AS STRING))) AS sk_movimento,
+    md5(concat_ws('||', coalesce(CAST(le.id AS STRING), '<NULL>'), coalesce(CAST(le.id_loja AS STRING), '<NULL>'))) AS sk_movimento,
     p.sk_produto,
     le.id_loja                  AS sk_loja,
     CAST(date_format(le.datamovimento, 'yyyyMMdd') AS INT)                  AS sk_tempo,

@@ -13,7 +13,7 @@ PARTITIONED BY (ano, mes)
 AS
 SELECT
     -- Surrogate key do fato
-    md5(concat_ws('||', CAST(o.id AS STRING), CAST(o.id_loja AS STRING)))   AS sk_oferta,
+    md5(concat_ws('||', coalesce(CAST(o.id AS STRING), '<NULL>'), coalesce(CAST(o.id_loja AS STRING), '<NULL>')))   AS sk_oferta,
 
     -- Chaves estrangeiras
     p.sk_produto,

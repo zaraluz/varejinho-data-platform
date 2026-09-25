@@ -16,7 +16,7 @@ WITH situacao AS (
     FROM varejinho.silver.situacaopagarfornecedorparcela
 )
 SELECT
-    md5(concat_ws('||', CAST(pp.id AS STRING), CAST(pf.id_loja AS STRING))) AS sk_parcela,
+    md5(concat_ws('||', coalesce(CAST(pp.id AS STRING), '<NULL>'), coalesce(CAST(pf.id_loja AS STRING), '<NULL>'))) AS sk_parcela,
     f.sk_fornecedor,
     pf.id_loja                  AS sk_loja,
     CAST(date_format(pp.datavencimento, 'yyyyMMdd') AS INT)                 AS sk_tempo_vencimento,

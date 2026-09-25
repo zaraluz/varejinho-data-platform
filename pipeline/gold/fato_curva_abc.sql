@@ -1,7 +1,7 @@
 -- pipeline/gold/fato_curva_abc.sql
 -- Grão: 1 linha por produto/loja/snapshot_date
 -- SK: MD5(id_produto || id_loja || snapshot_date)
--- Sem join temporal — snapshot já é o estado naquela data
+-- Join temporal com dim_produto — versão vigente na snapshot_date
 -- Partição: snapshot_date
 -- Classe ABC por extenso (A/B/C): 8 papéis de um domínio de 3 linhas viram texto no fato,
 -- em vez de 8 relacionamentos com uma dimensão minúscula.
@@ -20,9 +20,9 @@ WITH abc AS (
 SELECT
     -- Surrogate key do fato
     md5(concat_ws('||',
-        CAST(c.id_produto AS STRING),
-        CAST(c.id_loja AS STRING),
-        CAST(c.snapshot_date AS STRING)))                                    AS sk_curva,
+        coalesce(CAST(c.id_produto AS STRING), '<NULL>'),
+        coalesce(CAST(c.id_loja AS STRING), '<NULL>'),
+        coalesce(CAST(c.snapshot_date AS STRING), '<NULL>')))                                    AS sk_curva,
 
     -- Chaves estrangeiras
     p.sk_produto,
