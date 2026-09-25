@@ -3,6 +3,7 @@
 -- SK: MD5(id || id_loja)
 -- Join temporal com dim_produto SCD2 — versão vigente na data da perda
 -- Partição: ano/mes da data da perda
+-- Motivo da perda → dim_motivo_perda
 
 CREATE OR REPLACE TABLE varejinho.gold.fato_perdas
 USING DELTA
@@ -14,9 +15,9 @@ SELECT
 
     -- Chaves estrangeiras
     p.sk_produto,
-    pe.id_loja,
+    pe.id_loja                  AS sk_loja,
     CAST(date_format(pe.data, 'yyyyMMdd') AS INT)                           AS sk_tempo,
-    pe.id_tipomotivoperda,
+    CAST(pe.id_tipomotivoperda AS INT)                                      AS sk_motivo_perda,
 
     -- Chave natural
     pe.id                       AS id_perda,

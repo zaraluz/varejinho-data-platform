@@ -3,7 +3,7 @@
 -- SK: MD5(id || id_loja) — garante unicidade mesmo com múltiplas fontes
 -- Join temporal com dim_produto SCD2 — pega a versão vigente na data da venda
 -- Partição: ano/mes — baixa cardinalidade, Power BI sempre filtra período
--- Z-Order: sk_produto, id_loja — alta cardinalidade, file skipping dentro da partição
+-- Z-Order: sk_produto, sk_loja — alta cardinalidade, file skipping dentro da partição
 
 CREATE OR REPLACE TABLE varejinho.gold.fato_vendas
 USING DELTA
@@ -15,7 +15,7 @@ SELECT
 
     -- Chaves estrangeiras para as dimensões
     p.sk_produto,
-    v.id_loja,
+    v.id_loja                   AS sk_loja,
     CAST(date_format(v.data, 'yyyyMMdd') AS INT)  AS sk_tempo,
 
     -- Chave natural (para rastreabilidade)

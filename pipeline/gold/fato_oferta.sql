@@ -3,6 +3,7 @@
 -- SK: MD5(id || id_loja)
 -- Join com dim_produto — versão vigente na data de início da oferta
 -- Partição: ano/mes da data de início da oferta
+-- Tipo de oferta → dim_tipo_oferta; id_situacaooferta fica fora (domínio não extraído)
 -- Full load na Silver — inclui ofertas futuras
 -- Base para TCC: detecção de margem negativa em oferta
 
@@ -16,10 +17,9 @@ SELECT
 
     -- Chaves estrangeiras
     p.sk_produto,
-    o.id_loja,
+    o.id_loja                   AS sk_loja,
     CAST(date_format(o.datainicio, 'yyyyMMdd') AS INT)                      AS sk_tempo,
-    o.id_situacaooferta,
-    o.id_tipooferta,
+    CAST(o.id_tipooferta AS INT)                                            AS sk_tipo_oferta,
 
     -- Chave natural
     o.id                        AS id_oferta,
