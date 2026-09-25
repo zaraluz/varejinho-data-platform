@@ -1,0 +1,35 @@
+# pipeline/resources/vigia_atualizacao.yml — job de produção (deployado em dev e prod).
+
+resources:
+  jobs:
+    vigia_atualizacao:
+      name: "[${bundle.target}] Varejinho — Vigia de Atualização"
+      tags:
+        purpose: production
+      # Job SEPARADO do pipeline diário, de propósito: um check dentro do pipeline
+      # morre junto com ele e não vê o run que nunca começou.
+      # 07:00 = run das 03:00 + corte duro de 2h + 2h de folga.
+      # Schedule nasce PAUSED; prod liga pelo databricks.yml, como os demais.
+      schedule:
+        quartz_cron_expression: "0 0 7 * * ?"
+        timezone_id: "America/Fortaleza"
+        pause_status: PAUSED
+      timeout_seconds: 900
+      email_notifications:
+        on_failure:
+          - ${var.alert_email}
+      max_concurrent_runs: 1
+      parameters:
+        - name: catalog
+          default: ${var.catalog}
+        - name: max_lag_days
+          default: "1"
+      tasks:
+        - task_key: freshness_check
+          notebook_task:
+            notebook_path: ${workspace.file_path}/pipeline/monitoring/freshness_check.py
+          description: "Falha se algum watermark ou fato Gold não estiver atualizado"
+          # Um retry separa erro transitório da plataforma de dado velho: dado velho
+          # continua velho 5 min depois e o e-mail sai do mesmo jeito.
+          max_retries: 1
+          min_retry_interval_millis: 300000

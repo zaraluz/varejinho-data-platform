@@ -8,11 +8,12 @@ How production runs unattended, how a failure reaches the operator, and what to 
 |---|---|---|
 | `pipeline_diario` | Daily at 03:00 | Email on failure; email when a run passes 1 hour; hard timeout at 2 hours |
 | `manutencao_semanal` | Sundays at 02:00 | Email on failure |
+| `vigia_atualizacao` | Daily at 07:00 | Email when data is stale (one retry first, to rule out a platform hiccup) |
 | `dbt_tests` | Manual only | None (the same tests run inside `pipeline_diario`) |
 
 All production jobs run as the service principal, one run at a time. After a green daily run, Gold holds data up to the previous day (D-1). Dev jobs stay paused; running them never touches production.
 
-**Silence is not success.** Failure emails only exist for runs that start. A run that never starts (for example, a deploy that paused the schedule) sends nothing, so glance at the job's run list in the morning: the latest run should be from today and green.
+**Silence is not success.** Failure emails only exist for runs that start. A run that never starts (for example, a deploy that paused the schedule) sends nothing, and neither does a green run that found no new day to process. `vigia_atualizacao` closes that gap: at 07:00 it checks that every watermark is committed through yesterday and every Gold fact was rebuilt today, and fails with an email otherwise. It runs on the same workspace and scheduler as the pipeline, so it cannot see a workspace-wide outage or its own pause: once a week, confirm its run list shows a green run every morning.
 
 ## Three rules
 
@@ -33,6 +34,7 @@ All production jobs run as the service principal, one run at a time. After a gre
 | `dbt_test` | A test error (warnings do not fail the run) | Gold is already published. Fix and repair; warn consumers if the error affects them. |
 | Duration warning | The run passed 1 hour | Usually serverless wait (see the README measurements). Act only if it repeats. |
 | Timeout | The run was stopped at 2 hours | Repair. If it repeats, investigate before the next scheduled run. |
+| `vigia_atualizacao` | Data is not current at 07:00 | The message lists what is stale. Open today's `pipeline_diario` run. **No run today:** the schedule is paused or gone; check `pause_status` in the bundle and redeploy, then run the pipeline manually. **Run failed or still running:** follow the failing task's row above. **Run green but watermarks behind:** no day matured, so the extractor did not close yesterday's partition; check the extractor and the day's folder on S3, then run the pipeline once it has. |
 
 ## Weekly maintenance
 
