@@ -27,19 +27,20 @@ def required_param(nome: str) -> str:
 CATALOG = required_param("catalog")
 
 tabelas_fato = [
-    ("fato_vendas",            "sk_produto, id_loja"),
+    ("fato_vendas",            "sk_produto, sk_loja"),
     ("fato_compras",           "sk_produto, sk_fornecedor"),
     ("fato_perdas",            "sk_produto"),
-    ("fato_movimento_estoque", "sk_produto, id_loja"),
+    ("fato_movimento_estoque", "sk_produto, sk_loja"),
     ("fato_promocoes",         "sk_produto"),
-    ("fato_oferta",            "sk_produto, id_loja"),
+    ("fato_oferta",            "sk_produto, sk_loja"),
     ("fato_contas_pagar",      "sk_fornecedor"),
     ("fato_outras_despesas",   "sk_fornecedor"),
     ("fato_curva_abc",         "sk_produto"),
 ]
 
 tabelas_dim = [
-    "dim_produto", "dim_fornecedor", "dim_mercadologico", "dim_loja", "dim_tempo"
+    "dim_produto", "dim_fornecedor", "dim_mercadologico", "dim_loja", "dim_tempo",
+    "dim_tipo_pagamento", "dim_tipo_entrada", "dim_motivo_perda", "dim_tipo_oferta", "dim_promocao",
 ]
 
 for tabela, zorder in tabelas_fato:
