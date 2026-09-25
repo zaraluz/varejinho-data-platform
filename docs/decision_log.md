@@ -881,3 +881,14 @@ Facts name the store key `sk_loja`, as the dimension does.
 
 **Consequence**
 `dim_mercadologico` stays as the reference for the tree, including subgroups without products. Flattened hierarchy names are Type 1; the path of each product version stays Type 2 in `dim_produto`. The Gold quality gate gains checks for descriptions, fact-to-dimension keys and hierarchy names; dbt gains relationships tests; weekly maintenance covers the new dimensions.
+
+## 2026-09-25 — Surrogate key hashes mark null inputs explicitly
+
+**Decision**
+Every Gold surrogate key hashes its inputs as `coalesce(CAST(x AS STRING), '<NULL>')` inside `md5(concat_ws('||', ...))`, the same sentinel the Silver SCD2 change hash already uses.
+
+**Why**
+`concat_ws` skips null arguments. A key built from `(a, NULL, c)` hashes `a||c`, the same string as `(a, c, NULL)`: positions shift, different rows can share a key, and nothing reports it. With the sentinel, every input keeps its position and a null is part of the key instead of disappearing from it.
+
+**Consequence**
+For non-null inputs the hashed string is unchanged, so an existing key can only change value if one of its inputs is null; null key inputs are counted in dev before merging. The sentinel keeps the hash deterministic; it does not make a null key input acceptable. Contracts and not-null tests on the inputs still decide that.
