@@ -69,6 +69,8 @@ Gold currently does not persist a dedicated technical load timestamp on every re
 
 Freshness will be added only when the project has a reliable load-time signal that represents the actual Gold refresh.
 
+Pipeline freshness is enforced outside dbt, by the `vigia_atualizacao` job: it reads the committed watermarks and the Delta history of each Gold fact, which are the real load-time signals.
+
 ## Exposure
 
 Power BI is intentionally not declared as a dbt exposure yet because the consumer reconnection is still downstream of the current hardening/reconciliation gates. Add the exposure when that dependency is real again.

@@ -74,7 +74,7 @@ flowchart LR
     PDI --> RAW --> BR
     CP -.enforces.-> SI
     CTL <-.-> CP
-    GO --> BI["Power BI<br/>(reconnection after<br/>ERP × Gold reconciliation)"]
+    GO --> BI["Power BI<br/>(reconnection to Gold next)"]
 ```
 
 **Layer responsibilities.** Bronze preserves the raw source exactly and exposes file metadata. Silver turns it into a trustworthy interface: types, grain, deduplication, contracts, quarantine and history. Gold serves analytics: a star schema whose facts carry the dimension version valid at the business date of each event.
@@ -110,6 +110,8 @@ flowchart TB
 
 The watermark of an entity only moves in its `COMMIT` task, which only runs if `VALIDATE` passed. A failure in one fact leaves every other committed entity untouched and is retried surgically.
 
+A failure email only exists for a run that starts. At 07:00 a separate job, `vigia_atualizacao`, checks the outcome from outside the run: every watermark committed through yesterday and every Gold fact rebuilt today. It reports what the run's own emails cannot: a paused schedule, a run that never started, and a green run that found no new day to process.
+
 ---
 
 ## Guarantees and how each one is proven
@@ -125,9 +127,9 @@ Each guarantee has a mechanism in the runtime and an isolated fixture that prove
 | Facts use the version valid when the event happened | Point-in-time joins on each fact's business date | Gold QG: stored surrogate key = expected temporal key for every audited relation |
 | The Silver interface is enforced, not documented | One contract engine: structural breaks fail closed, bad rows go to quarantine, warnings never block | C3 7/7 |
 | A schema change is a decision, not a side effect | Drift is detected and classified; baselines change only through explicit promotion | S2 6/6, 37/37 baselines audited exact vs. Silver |
-| The pipeline cannot stall silently | Timeliness check: committed watermark at most 2 days behind the business date | Silver QG (14 checks) |
+| The pipeline cannot stall silently | Inside the run: timeliness check, committed watermark at most 2 days behind the business date. Outside the run: `vigia_atualizacao`, a separate job at 07:00 that fails with an email when any watermark is not committed through yesterday or any Gold fact was not rebuilt today | Silver QG (14 checks); watchdog in dev: 26/26 on the current state, and with the threshold forced to 0 days the 14 fact watermarks fail after one retry and the failure email arrives |
 | Gold is correct and consistent | Gold quality gate + dbt source tests | Gold QG 73/73, dbt 61 pass / 2 warn / 0 error |
-| Gold agrees with the ERP's own reports | Top-down reconciliation against ERP reports: period × store, then day × store × product, compared in integer units (cents, thousandths) | Sales, 1 Aug – 23 Sep: exact match in quantity and value for the retail stores, across a month boundary. Losses, 1 Aug – 24 Sep: quantity matches on every key except four, each traced to an extraction gap (a record deleted in the ERP after extraction, an entry back-dated past the watermark window) |
+| Gold agrees with the ERP's own reports | Top-down reconciliation against the ERP's reports and source tables: period × location, then down to the day and the item, compared in integer units (cents, thousandths) | Sales, purchases, losses and accounts payable reconciled for every store and the distribution center, Aug–Sep 2026. Sales match exactly in quantity and value, across a month boundary. The only residuals are four loss records, each traced to an extraction gap (a record deleted in the ERP after extraction, an entry back-dated past the watermark window) |
 | Every code has a description and every fact key finds its dimension | Gold gate checks per domain, fact-to-dimension keys and hierarchy names; dbt relationships tests | Gold QG (16 checks) |
 
 The two dbt warnings are intentional business monitors (offer anomalies), not technical failures.
@@ -201,9 +203,10 @@ Two runs were profiled task by task (about 40 minutes each). Typical tasks take 
 ```text
 pipeline/        What production runs
 ├── databricks.yml     bundle identity, variables, targets, sync
-├── resources/         production jobs (pipeline_diario, manutencao_semanal, dbt_tests)
+├── resources/         production jobs (pipeline_diario, manutencao_semanal, vigia_atualizacao, dbt_tests)
 │   └── dev/           ops and validation jobs, declared only under targets.dev
 ├── bronze/  silver/  gold/     runtime notebooks and Gold SQL
+├── monitoring/        freshness watchdog, run outside the daily pipeline
 quality/         Control plane: contract engine, schema drift engine, partition manifests
 contracts/       Silver data contracts (YAML) and tier policy
 dbt/             Read-only tests and documentation over Gold sources
@@ -261,7 +264,7 @@ Runtime notebooks have no environment defaults: `catalog`, `bundle_files_path`, 
 Stated plainly, because a platform is only as trustworthy as its documented edges.
 
 - **Gold freshness is D-1 by design.** The source ERP is itself D+1; complete days are preferred over an incomplete current day.
-- **D+1 maturity depends on the extractor schedule and UTC.** A stalled boundary is caught by the timeliness gate; replacing the rule is listed in the next steps.
+- **D+1 maturity depends on the extractor schedule and UTC.** A stalled boundary is reported by the freshness watchdog the next morning and fails the timeliness gate within two days; replacing the rule is listed in the next steps.
 - **Z-Order does not survive the daily Gold rebuild.** Gold facts are recreated with `CREATE OR REPLACE` and Z-Order is applied weekly, so file skipping on product filters is lost the next day (the 33 MB product query above).
 - **Serverless wait dominates run time** on Free Edition (see measurements).
 - **Source orphans.** Some supplier-payment installments reference headers absent from the source extract; the Gold gate reports them as a source limitation instead of dropping them silently or fabricating a header.
@@ -272,7 +275,6 @@ Stated plainly, because a platform is only as trustworthy as its documented edge
 
 Planned work. Each step is validated with the same gates and fixtures before it is considered done.
 
-- **Freshness alert.** Failure emails only cover runs that start; add an alert for a daily run that never happened.
 - **Narrower storage access.** Move control storage to an external volume so the service principal's file writes are scoped to it instead of the whole bucket.
 - **CI.** GitHub Actions running bundle validation for both targets, linting and PySpark unit tests over the `quality/` engines, so regressions are caught in the pull request instead of in the workspace.
 - **Extraction v2.** One daily load (the ERP is D+1 anyway), partitions keyed by business date and a `_SUCCESS` marker written by the extractor. Maturity becomes "the partition is marked complete", removing the dependency on clock time and timezone. It also closes the two gaps the loss reconciliation traced: a lookback that re-reads recent days to catch back-dated entries, and capture of records deleted in the ERP after extraction.

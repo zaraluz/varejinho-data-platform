@@ -2,7 +2,8 @@
 # Raiz do bundle: identidade, variáveis, sync e targets.
 #
 # Os jobs vivem em resources/:
-#   resources/*.yml      -> jobs de produção (pipeline_diario, manutencao_semanal, dbt_tests),
+#   resources/*.yml      -> jobs de produção (pipeline_diario, manutencao_semanal,
+#                           vigia_atualizacao, dbt_tests),
 #                           deployados em dev e em prod
 #   resources/dev/*.yml  -> jobs de operação (ops/) e de prova (validation/), declarados
 #                           somente em targets.dev: nunca existem em prod
@@ -84,5 +85,8 @@ targets:
           schedule:
             pause_status: UNPAUSED
         manutencao_semanal:
+          schedule:
+            pause_status: UNPAUSED
+        vigia_atualizacao:
           schedule:
             pause_status: UNPAUSED

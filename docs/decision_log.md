@@ -892,3 +892,17 @@ Every Gold surrogate key hashes its inputs as `coalesce(CAST(x AS STRING), '<NUL
 
 **Consequence**
 For non-null inputs the hashed string is unchanged, so an existing key can only change value if one of its inputs is null; null key inputs are counted in dev before merging. The sentinel keeps the hash deterministic; it does not make a null key input acceptable. Contracts and not-null tests on the inputs still decide that.
+
+## 2026-09-25 — A separate job reports stale data every morning
+
+**Decision**
+`vigia_atualizacao` runs at 07:00 (America/Fortaleza) as its own job, outside `pipeline_diario`. It fails, and the failure emails, when any of the 17 expected watermarks (14 facts, 3 SCD2 dimensions) is not `COMMITTED` through yesterday or has a pending candidate, or when any of the 9 Gold facts was not rebuilt today. Only rebuilds count in the Delta history: `OPTIMIZE` and `VACUUM` also write to it and would look like fresh data on Sundays. One retry, five minutes apart, separates a platform hiccup from stale data.
+
+**Why**
+- Failure emails exist only for runs that start. A paused schedule, a run that never starts, and a green run that found no new day to process all stay silent.
+- The last case is the dangerous one: if the extractor does not close a day, the Silver finds no mature partition, the run ends green and Gold is rebuilt unchanged.
+- The Silver timeliness check cannot cover the first two cases because it runs inside the job that did not run, and its 2-day tolerance lets one missed day pass. The watchdog's threshold is 1 day, the smallest that still tolerates the normal D-1 state, so a single missed run is reported the next morning.
+- Alternatives: a task at the end of the daily job (it dies with the job); a SQL alert (not verified for this workspace edition and bundle version); an external heartbeat such as a scheduled GitHub Actions workflow (the only option independent of Databricks, but it needs a workspace token stored outside Databricks).
+
+**Consequence**
+The watchdog shares the workspace and the scheduler with the pipeline: a workspace-wide outage, or a pause of the watchdog itself, is silent again. The daily operations runbook keeps a weekly look at its run list, and an external heartbeat is the next step if that residual matters. Proven in dev: 26/26 on the current state; with the threshold forced to 0 days the 14 fact watermarks fail after one retry, and the failure email arrives.
