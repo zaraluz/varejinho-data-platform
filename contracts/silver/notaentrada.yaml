@@ -1,13 +1,21 @@
 table: notaentrada
 owner: zara.louise
-description: Notas fiscais de entrada, deduplicadas por chave composta real
+description: Lançamentos de nota fiscal de entrada, um por id do ERP
 sla_freshness_hours: 8
+# Grão = id, a chave primária do lançamento no ERP e a mesma que os itens usam
+# (notaentradaitem.id_notaentrada). numeronota + id_loja + id_fornecedor NÃO é
+# único: o número da nota é do emissor, e o mesmo número vira mais de um
+# lançamento (NFP de produtor rural reutiliza número; nota relançada depois de
+# ficar NÃO FINALIZADO). Usar a chave composta como grain fundia lançamentos
+# diferentes no MERGE e deixava os itens de um deles sem cabeçalho.
 grain:
-  - numeronota
-  - id_loja
-  - id_fornecedor
+  - id
 
 columns:
+  - name: id
+    type: string
+    nullable: false
+    unique: true
   - name: numeronota
     type: string
     nullable: false
@@ -27,10 +35,16 @@ columns:
 
 quality_rules:
   - rule: no_duplicates
-    key: [numeronota, id_loja, id_fornecedor]
+    key: [id]
     severity: error
+  # Reuso de número dentro do mesmo lote é um fato da origem, não um erro:
+  # vira aviso no relatório do contrato e nunca remove linha. O reuso entre
+  # dias diferentes aparece na linha informativa do Silver QG.
+  - rule: no_duplicates
+    key: [numeronota, id_loja, id_fornecedor]
+    severity: warning
   - rule: not_null
-    columns: [numeronota, id_loja, id_fornecedor, dataentrada]
+    columns: [id, numeronota, id_loja, id_fornecedor, dataentrada]
     severity: error
   - rule: freshness
     column: dataentrada
