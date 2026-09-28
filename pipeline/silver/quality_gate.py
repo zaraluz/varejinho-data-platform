@@ -230,6 +230,34 @@ for tabela in INCREMENTAL_FACTS:
         resultados.append(f"❌ {tabela} incremental QG: {str(e)[:200]}")
 
 
+# ── Informativos — medem um fato da origem, nunca reprovam o gate ─────────
+# Ficam fora de `resultados` de propósito: não entram na contagem de checks
+# nem no pass/fail. Servem para acompanhar uma característica da origem que
+# não é erro, mas que uma regra de negócio da Gold precisa conhecer.
+informativos = []
+
+# notaentrada: o grão é o id do ERP. O número da nota é do emissor e se repete
+# (NFP de produtor reutiliza número; nota relançada ganha id novo). A regra do
+# contrato só enxerga repetição dentro do mesmo lote; aqui é a tabela inteira.
+try:
+    reuso = spark.sql(f"""
+        SELECT COUNT(*) AS numeros, COALESCE(SUM(lancamentos), 0) AS lancamentos
+        FROM (
+            SELECT numeronota, id_loja, id_fornecedor, COUNT(*) AS lancamentos
+            FROM {CATALOG}.silver.notaentrada
+            GROUP BY numeronota, id_loja, id_fornecedor
+            HAVING COUNT(*) > 1
+        )
+    """).collect()[0]
+    informativos.append(
+        f"ℹ️ notaentrada — número de nota reutilizado "
+        f"({reuso['numeros']:,} números de nota com mais de um lançamento, "
+        f"{reuso['lancamentos']:,} lançamentos; informativo)"
+    )
+except Exception as e:
+    informativos.append(f"ℹ️ notaentrada — reuso de número indisponível: {str(e)[:160]}")
+
+
 # ── SCD2 — integridade das dimensões ──────────────────────────────────────
 for dim in ["produto", "fornecedor", "mercadologico"]:
     try:
@@ -351,6 +379,11 @@ for tabela in QUARENTENAS:
 print(f"\n=== SILVER QUALITY GATE [{CATALOG}] ===\n")
 for r in resultados:
     print(r)
+
+if informativos:
+    print("\nInformativos (não contam como check):")
+    for r in informativos:
+        print(r)
 
 total = len(resultados)
 passou = sum(1 for r in resultados if r.startswith("✅"))
