@@ -107,7 +107,7 @@ Este documento descreve as transformações aplicadas em cada camada da platafor
 |---|---|---|
 | id | string | PK |
 | id_loja | string | FK loja |
-| numeronota | string | Número da NF — não único sozinho |
+| numeronota | string | Número da NF, definido pelo emissor — não é único nem com loja e fornecedor |
 | id_fornecedor | string | FK fornecedor |
 | dataentrada | string | Watermark — formato `yyyy/MM/dd HH:mm:ss.SSS` |
 | id_tipoentrada | string | FK tipoentrada |
@@ -197,7 +197,7 @@ Este documento descreve as transformações aplicadas em cada camada da platafor
 |---|---|
 | Cast decimal | `valortotal`, `valormercadoria`, `valordesconto` |
 | Cast timestamp | `dataentrada` |
-| Chave de dedup | `numeronota + id_loja + id_fornecedor` — fornecedores NFP-PRODUTOR reutilizam numeração entre lojas |
+| Chave de dedup | `id` (PK do lançamento no ERP, a mesma que `notaentradaitem.id_notaentrada` referencia). `numeronota + id_loja + id_fornecedor` não é único: NFP de produtor reutiliza número e nota relançada ganha id novo com o mesmo número. O reuso é reportado (aviso no contrato, linha informativa no Silver QG), nunca deduplicado na Silver |
 | Partição | `ano`, `mes` |
 
 **Nota:** não tem fato correspondente na Gold ainda.
