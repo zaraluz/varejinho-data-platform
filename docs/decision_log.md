@@ -906,3 +906,16 @@ For non-null inputs the hashed string is unchanged, so an existing key can only 
 
 **Consequence**
 The watchdog shares the workspace and the scheduler with the pipeline: a workspace-wide outage, or a pause of the watchdog itself, is silent again. The daily operations runbook keeps a weekly look at its run list, and an external heartbeat is the next step if that residual matters. Proven in dev: 26/26 on the current state; with the threshold forced to 0 days the 14 fact watermarks fail after one retry, and the failure email arrives.
+
+## 2026-09-28 — The Silver grain of `notaentrada` is the ERP entry id
+
+**Decision**
+`silver.notaentrada` is keyed by `id`, the primary key of the entry in the ERP and the key `notaentradaitem.id_notaentrada` references. The contract, the runtime merge, the batch validator, the dev validation job and the maturity repair ops change together; the contract runtime refuses a runtime grain that differs from the contract, so a partial change fails before writing. `numeronota + id_loja + id_fornecedor` stays as a warning rule in the contract and as an informational line in the Silver quality gate.
+
+**Why**
+- The earlier finding that `numeronota` alone is not unique was right, but the composite key is not unique either. The note number belongs to the issuer: producer notes (NFP) reuse numbers, and a note left unfinished and re-entered gets a new id with the same number. Measured on the full entry history: about 0.2% of entries share a composite key with another entry, all of them finished entries with different dates and values.
+- Merging on the composite key treated a later entry as an update of an earlier one. The earlier entry disappeared from Silver without a contract violation, because uniqueness is scoped to one ingestion date and the two entries arrived on different days. Its items kept pointing to an id that no longer existed.
+- Silver mirrors the source. Which entry counts (only finished ones, the latest of a re-entry) is a business rule; it belongs, explicit and documented, in the Gold entry fact.
+
+**Consequence**
+Silver can hold several entries with the same note number, store and supplier; the informational line shows how many. The key change is code only: every current row already has a distinct id. Entries fused before the change come back through a separate repair, which must run only after this change is in production; otherwise the composite-key merge would match the restored entries to one incoming row and write duplicates. The historical gate scripts D1 and D2 keep the key they were proven with.

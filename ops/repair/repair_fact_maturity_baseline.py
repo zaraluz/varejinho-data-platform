@@ -47,7 +47,7 @@ if not CATALOG.endswith("_dev"):
     raise Exception(f"Gate D6B só pode executar em *_dev. Recebido: {CATALOG}")
 
 CONFIG = {
-    "notaentrada": {"chave": ["numeronota", "id_loja", "id_fornecedor"], "data": "dataentrada", "decimais": ["valortotal", "valormercadoria", "valordesconto"]},
+    "notaentrada": {"chave": ["id"], "data": "dataentrada", "decimais": ["valortotal", "valormercadoria", "valordesconto"]},
     "notaentradaitem": {"chave": ["id"], "data": None, "decimais": ["quantidade", "valor", "valortotal"]},
     "perda": {"chave": ["id"], "data": "data", "decimais": ["quantidade", "valor"]},
     "logestoque": {"chave": ["id"], "data": "datamovimento", "decimais": ["quantidade", "estoqueanterior", "estoqueatual", "custocomimposto", "custosemimposto", "customediocomimposto", "customediosemimposto"]},

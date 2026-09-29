@@ -36,7 +36,7 @@ CONTROL_TABLE = job_param("control_table", f"{CATALOG}.control.fact_watermark")
 REPAIR_FROM = job_param("repair_from", "2026-09-18")
 
 CONFIG = {
-    "notaentrada": {"chave": ["numeronota", "id_loja", "id_fornecedor"], "data": "dataentrada", "decimais": ["valortotal", "valormercadoria", "valordesconto"]},
+    "notaentrada": {"chave": ["id"], "data": "dataentrada", "decimais": ["valortotal", "valormercadoria", "valordesconto"]},
     "notaentradaitem": {"chave": ["id"], "data": None, "decimais": ["quantidade", "valor", "valortotal"]},
     "perda": {"chave": ["id"], "data": "data", "decimais": ["quantidade", "valor"]},
     "logestoque": {"chave": ["id"], "data": "datamovimento", "decimais": ["quantidade", "estoqueanterior", "estoqueatual", "custocomimposto", "custosemimposto", "customediocomimposto", "customediosemimposto"]},
