@@ -22,7 +22,7 @@ The same rule as the daily pipeline: the most recent extraction wins.
 | Present, newer extraction | Present, older extraction | Update |
 | Present, older or same extraction | Present | Leave as is |
 
-Source = the recovered file (every row gets `ingestion_date = 2026-09-16`, the date it was extracted) plus the committed Bronze (`ingestion_date` up to the committed watermark). Every row passes the Silver contract first; rows that fail go to `_quarantine_history_notaentrada`, never to `_quarantine_notaentrada`, so the daily quality gate is not affected. The repair never deletes a row.
+Source = the recovered file (every row gets `ingestion_date = 2026-09-16`, the date it was extracted) plus the committed Bronze (`ingestion_date` up to the committed watermark). The recovered file and the daily folder `ingestion_date=2026-09-16` share the same extraction date; for an entry in both, the daily row wins, because the daily file is the one that overwrote the backfill (it is the later extraction). Every row passes the Silver contract first; rows that fail go to `_quarantine_history_notaentrada`, never to `_quarantine_notaentrada`, so the daily quality gate is not affected. The repair never deletes a row.
 
 ## Before you start
 
@@ -53,7 +53,7 @@ Deploy the bundle to dev and run the job `[dev] Varejinho — Reparo do Históri
 |---|---|---|
 | plan | defaults (`step=plan`) | Counts of inserts, updates and unchanged rows; invalid rows; orphan items today and after the apply. Nothing is written. |
 | apply, dry run | `step=apply` | The same counts, marked `[dry-run]`. Nothing is written. |
-| apply | `step=apply`, `dry_run=false`, `confirm_target=varejinho_dev`, `approved_by=<name>` | Prints the Silver version **before** the apply (keep it: rollback returns there), then the new version. |
+| apply | `step=apply`, `dry_run=false`, `confirm_target=varejinho_dev`, `approved_by=<name>` | Prints the Silver version **before** the apply (keep it: rollback returns there), then the new version, and appends one row to `control.ops_repair_log`. |
 | verify | `step=verify` | Every check green. |
 
 What the checks mean:

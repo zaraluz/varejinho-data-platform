@@ -16,12 +16,17 @@
 #   - id ausente na Silver            → insere
 #   - id presente e fonte mais nova   → atualiza (s.ingestion_date > t.ingestion_date)
 #   - id presente e Silver mais nova  → não mexe
+# Conflito no mesmo dia: o arquivo recuperado e a pasta diária da Bronze têm a mesma
+# data de extração (16/09). O diário é o mais recente dos dois (foi ele que sobrescreveu
+# o backfill no S3), então, para um id presente nos dois, a linha do diário vence e a
+# do backfill sai da fonte. Sem isso, o mesmo id apareceria duas vezes na mesma
+# ingestion_date e o contrato (no_duplicates [id] por ingestion_date) quarentenaria.
 #
 # Um passo por execução (parâmetro `step`):
 #   plan      só leitura: fontes, contrato, quantos inserts/updates, órfãos de item
 #   apply     escreve (dry_run=true por padrão): inválidos no histórico de quarentena,
-#             depois MERGE na Silver; o commit leva userMetadata (marca + committed
-#             usado) para o verify achar a versão e reproduzir a mesma fonte
+#             depois MERGE na Silver; registra em control.ops_repair_log as versões
+#             antes/depois e o committed usado, para o verify reproduzir a mesma fonte
 #   verify    só leitura: compara a versão anterior e a posterior ao apply
 #   rollback  RESTORE da Silver para a versão anterior ao apply (exige confirmação)
 #
@@ -70,7 +75,8 @@ ITEMS = f"{CATALOG}.silver.notaentradaitem"
 BRONZE = f"{BRONZE_SOURCE_CATALOG}.bronze.{ENTITY}"
 HISTORY = f"{CATALOG}.silver._quarantine_history_{ENTITY}"
 WATERMARK = f"{CATALOG}.control.fact_watermark"
-MARK = "ops:backfill_notaentrada_history"   # prefixo do userMetadata do commit do reparo
+REPAIR_LOG = f"{CATALOG}.control.ops_repair_log"   # 1 linha por apply real: versões e committed
+REPAIR_NAME = "backfill_notaentrada_history"
 
 # Mesma tipagem de CONFIG["notaentrada"] em pipeline/silver/incremental_facts.py.
 # Quando a tipagem centralizada (quality/fact_typing.py) entrar na main, este reparo
@@ -168,6 +174,13 @@ def source(committed: date):
         .withColumn("ingestion_date", F.col("ingestion_date").cast(ing_type))
         .filter(F.col("ingestion_date").cast("date") <= F.lit(committed))
     )
+    # Conflito no mesmo dia (ver cabeçalho): o diário vence, a linha do backfill sai.
+    same_day_ids = bronze.filter(F.col("ingestion_date").cast("date") == F.lit(BACKFILL_DATE)).select("id")
+    n_backfill = backfill.count()
+    backfill = backfill.join(same_day_ids, "id", "left_anti")
+    print(f"backfill: {n_backfill:,} linhas | {n_backfill - backfill.count():,} ids também na pasta "
+          f"diária de {BACKFILL_DATE} (o diário vence; saem do backfill)")
+
     for name, df in (("backfill", backfill), ("bronze", bronze)):
         missing = sorted(set(silver_cols) - {"ano", "mes"} - set(df.columns))
         if missing:
@@ -218,20 +231,27 @@ def orphan_items(headers) -> int:
     )
 
 
-def silver_versions():
-    return spark.sql(f"DESCRIBE HISTORY {SILVER}").select("version", "userMetadata", "operation")
+def current_version() -> int:
+    return DeltaTable.forName(spark, SILVER).history(1).collect()[0]["version"]
 
 
 def repair_commit():
-    """Versão e committed do último apply real, lidos do userMetadata do commit."""
+    """Versões antes/depois e committed do último apply real, lidos do log de reparo.
+
+    Log em tabela de controle, e não no userMetadata do commit: o userMetadata exige
+    spark.conf.set, que o serverless não aceita para essa chave.
+    """
+    if not spark.catalog.tableExists(REPAIR_LOG):
+        raise Exception(f"{REPAIR_LOG} não existe: o apply real não rodou")
     rows = (
-        silver_versions().filter(F.col("userMetadata").startswith(MARK))
-        .orderBy(F.col("version").desc()).collect()
+        spark.table(REPAIR_LOG)
+        .filter((F.col("repair") == REPAIR_NAME) & (F.col("target_table") == SILVER))
+        .orderBy(F.col("applied_at").desc()).limit(1).collect()
     )
     if not rows:
-        raise Exception(f"nenhum commit com userMetadata '{MARK}...' em {SILVER}: o apply real não rodou")
-    meta = dict(kv.split("=", 1) for kv in rows[0]["userMetadata"].split(";")[1:])
-    return rows[0]["version"], date.fromisoformat(meta["committed"])
+        raise Exception(f"nenhum apply de {REPAIR_NAME} em {REPAIR_LOG}: o apply real não rodou")
+    r = rows[0]
+    return r["version_before"], r["version_after"], r["committed"]
 
 
 # ── passos ─────────────────────────────────────────────────────────────────
@@ -243,7 +263,9 @@ if STEP == "plan" or STEP == "apply":
 
     winners, invalid = validated(committed)
     silver_now = spark.table(SILVER)
-    marked = classify(winners, silver_now).cache()
+    # Sem .cache(): o serverless não aceita PERSIST. A fonte é recalculada a cada ação,
+    # o que é seguro porque ela só lê partições imutáveis (backfill e Bronze committed).
+    marked = classify(winners, silver_now)
     counts = {r["_acao"]: r["n"] for r in marked.groupBy("_acao").agg(F.count("*").alias("n")).collect()}
     n_insert, n_update, n_noop = counts.get("insert", 0), counts.get("update", 0), counts.get("noop", 0)
     n_invalid = invalid.count()
@@ -264,7 +286,7 @@ if STEP == "plan" or STEP == "apply":
         # Idempotência: rodar de novo não regrava nada, nem a quarentena.
         print("\n✅ nada a inserir nem atualizar: o reparo já está aplicado. Nada foi gravado.")
     elif STEP == "apply" and not DRY_RUN:
-        before = silver_versions().agg(F.max("version")).collect()[0][0]
+        before = current_version()
         print(f"\nVersão da Silver ANTES do apply: {before}  ← rollback volta para esta")
 
         # Quarentena ANTES do MERGE: se o append falhar (schema), a Silver não mudou.
@@ -275,32 +297,36 @@ if STEP == "plan" or STEP == "apply":
             )
 
         changes = marked.filter(F.col("_acao") != "noop").select(*silver_now.columns)
-        spark.conf.set(
-            "spark.databricks.delta.commitInfo.userMetadata",
-            f"{MARK};committed={committed};approved_by={APPROVED_BY}",
+        (
+            DeltaTable.forName(spark, SILVER).alias("t")
+            .merge(changes.alias("s"), "t.id = s.id")
+            .whenMatchedUpdateAll(condition="s.ingestion_date > t.ingestion_date")
+            .whenNotMatchedInsertAll()
+            .execute()
         )
-        try:
-            (
-                DeltaTable.forName(spark, SILVER).alias("t")
-                .merge(changes.alias("s"), "t.id = s.id")
-                .whenMatchedUpdateAll(condition="s.ingestion_date > t.ingestion_date")
-                .whenNotMatchedInsertAll()
-                .execute()
-            )
-        finally:
-            spark.conf.unset("spark.databricks.delta.commitInfo.userMetadata")
+        after = current_version()
+        if after != before + 1:
+            # Outro commit entrou entre o antes e o MERGE: o verify não teria como isolar o reparo.
+            raise Exception(f"esperado 1 commit do MERGE ({before}→{before + 1}), encontrado {before}→{after}. "
+                            f"Não rode o pipeline; rollback para {before} e investigue.")
 
-        print(f"✅ apply concluído: versão da Silver agora = {repair_commit()[0]} | "
+        spark.createDataFrame(
+            [(REPAIR_NAME, SILVER, before, after, committed, BACKFILL_TABLE, BACKFILL_DATE,
+              n_insert, n_update, n_invalid, APPROVED_BY)],
+            "repair string, target_table string, version_before long, version_after long, "
+            "committed date, backfill_table string, backfill_ingestion_date date, "
+            "inserted long, updated long, quarantined long, approved_by string",
+        ).withColumn("applied_at", F.current_timestamp()).write.mode("append").saveAsTable(REPAIR_LOG)
+
+        print(f"✅ apply concluído: versão da Silver agora = {after} | "
               f"inválidos no histórico de quarentena = {n_invalid:,} | aprovado por {APPROVED_BY}")
     elif STEP == "apply":
         print(f"\n{PREFIX}nada foi gravado. Para gravar: dry_run=false, confirm_target={CATALOG}, approved_by=<nome>")
-    marked.unpersist()
 
 elif STEP == "verify":
-    # O MERGE do apply é um commit só, e o apply real exige nenhum outro run ativo:
-    # a versão anterior à dele é exatamente a Silver que o apply encontrou.
-    v_after, committed = repair_commit()
-    v_before = v_after - 1
+    # O apply confere que o MERGE foi um commit só (antes + 1 = depois): a versão
+    # anterior é exatamente a Silver que o apply encontrou.
+    v_before, v_after, committed = repair_commit()
     before = spark.read.option("versionAsOf", v_before).table(SILVER)
     after = spark.read.option("versionAsOf", v_after).table(SILVER)
     # Mesma fonte do apply: committed lido do commit, não o de hoje (o pipeline
