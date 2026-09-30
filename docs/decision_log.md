@@ -919,3 +919,18 @@ The watchdog shares the workspace and the scheduler with the pipeline: a workspa
 
 **Consequence**
 Silver can hold several entries with the same note number, store and supplier; the informational line shows how many. The key change is code only: every current row already has a distinct id. Entries fused before the change come back through a separate repair, which must run only after this change is in production; otherwise the composite-key merge would match the restored entries to one incoming row and write duplicates. The historical gate scripts D1 and D2 keep the key they were proven with.
+
+## 2026-09-30 — The lost `notaentrada` history comes back through a separate landing and a one-time repair
+
+**Decision**
+The historical extract of `notaentrada`, recovered from a noncurrent S3 version, is copied to its own immutable prefix (`bronze_backfill/notaentrada/run_id=<UTC timestamp>/`) and registered as the external table `bronze.notaentrada_backfill`. A manual job (`reparo_notaentrada_historico`) merges it into Silver together with the committed Bronze, one step per run (plan, apply, verify, rollback), with the pipeline's rule: the most recent extraction wins. Missing entries are inserted; an existing entry is updated only when the source extraction is newer than the one already in Silver. Nothing is deleted.
+
+**Why**
+- The history was lost by an overwrite, not rejected by a rule: the historical extract and the daily extract wrote the same S3 key on the same day, and the daily one won. No contract or gate saw it because Silver never read the historical file.
+- Putting the file back under `bronze/notaentrada/` would add a new partition to committed history, which the mutation guard blocks by design. Weakening the guard for one repair would remove the protection against a source rewriting closed days. A separate prefix keeps Bronze's history immutable and makes the landing auditable.
+- Committed Bronze is part of the source because the composite-key merge had fused entries that Bronze still holds; the repair brings them back in the same pass.
+- The rule is the pipeline's rule, so after the repair Silver is exactly what the pipeline would have built had the history arrived normally. Using "the backfill always wins" would roll back entries that changed after the backfill was extracted.
+- Rows that fail the contract go to the quarantine history, not the daily quarantine, so the repair cannot fail the next run's quality gate.
+
+**Consequence**
+The repair is idempotent (a second apply writes nothing) and reversible (`RESTORE` to the version printed before the apply). The apply records the Silver versions before and after and the watermark it used in `control.ops_repair_log`, so verify rebuilds the same source even after the pipeline has moved on. An entry present both in the recovered file and in the daily folder of the same date keeps the daily row: both carry the same extraction date, and the daily file is the later of the two, since it is the one that overwrote the backfill. Runbook: `docs/runbooks/notaentrada_history_repair.md`. The cause stays open until the extraction writes one file per run: backfills go to their own prefix until then.
