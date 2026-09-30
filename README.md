@@ -223,6 +223,7 @@ Naming convention inside `validation/`: `profile_` and `diagnose_` only read; `p
 - [Production grants](ops/bootstrap/grant_prod_service_principal.sql): service principal and read-only group
 - [Production cutover runbook](docs/runbooks/production_cutover.md)
 - [Daily operations runbook](docs/runbooks/daily_operations.md): alerts, triage by failing task, repair vs. restore
+- [`notaentrada` history repair runbook](docs/runbooks/notaentrada_history_repair.md): one-time repair of history lost to a same-day overwrite in Bronze
 
 ---
 

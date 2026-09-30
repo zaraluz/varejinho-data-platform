@@ -1,0 +1,46 @@
+# pipeline/resources/reparo_notaentrada_historico.yml — job de reparo (deployado em dev e prod).
+
+resources:
+  jobs:
+    reparo_notaentrada_historico:
+      # O nome precisa conter "Reparo do Histórico": a trava de runs ativos do
+      # script ignora os runs deste próprio job e barra qualquer outro.
+      name: "[${bundle.target}] Varejinho — Reparo do Histórico de Notas de Entrada"
+      tags:
+        purpose: ops
+      # Sem schedule: roda uma vez por ambiente, pela operadora, um passo por execução
+      # (plan → apply → verify; rollback só se o verify falhar). Existe em prod porque
+      # lá a Silver pertence ao service principal: o job roda como ele (run_as do
+      # target), e nenhuma pessoa escreve em prod.
+      # Runbook: docs/runbooks/notaentrada_history_repair.md.
+      max_concurrent_runs: 1
+      parameters:
+        - name: catalog
+          default: ${var.catalog}
+        - name: bronze_source_catalog
+          default: ${var.bronze_source_catalog}
+        - name: bundle_files_path
+          default: ${workspace.file_path}
+        - name: step
+          default: plan
+        - name: dry_run
+          default: "true"
+        - name: confirm_target
+          default: "-"
+        - name: approved_by
+          default: "-"
+        # Landing imutável do arquivo recuperado (ops/storage/notaentrada_backfill_landing.sql).
+        # Em dev e prod é a mesma tabela: a Bronze é compartilhada, como as demais.
+        - name: backfill_table
+          default: ${var.bronze_source_catalog}.bronze.notaentrada_backfill
+        # Data da extração do arquivo recuperado: é a ingestion_date que as linhas
+        # recebem, e é ela que a regra "extração mais recente vence" compara.
+        - name: backfill_ingestion_date
+          default: "2026-09-16"
+        - name: rollback_version
+          default: "-"
+      tasks:
+        - task_key: repair_step
+          notebook_task:
+            notebook_path: ${workspace.file_path}/ops/repair/backfill_notaentrada_history.py
+          description: "Um passo do reparo (plan, apply, verify, rollback); dry_run por padrão"
