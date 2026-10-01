@@ -10,8 +10,9 @@
 -- no SQL editor. Runbook: docs/runbooks/production_cutover.md.
 -- Idempotente: GRANT repetido não duplica privilégio.
 --
--- Princípio: o SP lê a Bronze, escreve Silver/Gold/control e lê/escreve o
--- control storage no S3. Não recebe ALL PRIVILEGES, MANAGE nem CREATE SCHEMA.
+-- Princípio: o SP lê a Bronze (só como tabela), escreve Silver/Gold/control e
+-- lê/escreve o volume de controle. Nenhum privilégio de arquivo no bucket.
+-- Não recebe ALL PRIVILEGES, MANAGE nem CREATE SCHEMA.
 -- Pessoas só leem prod, por um grupo (seção 7): quem escreve é o SP.
 
 -- 1) Entrar no catálogo
@@ -26,13 +27,14 @@ GRANT USE SCHEMA, SELECT, MODIFY, CREATE TABLE ON SCHEMA varejinho.silver  TO `b
 GRANT USE SCHEMA, SELECT, MODIFY, CREATE TABLE ON SCHEMA varejinho.gold    TO `bf71079b-64e1-4763-8b86-1e90718d8864`;
 GRANT USE SCHEMA, SELECT, MODIFY, CREATE TABLE ON SCHEMA varejinho.control TO `bf71079b-64e1-4763-8b86-1e90718d8864`;
 
--- 4) Control storage no S3 (watermarks auxiliares, baselines de schema drift,
---    manifests de partição): leitura e escrita de arquivos.
---    `varejinho_lake_new` = s3://varejinho-lake/ (confirmado com SHOW EXTERNAL
---    LOCATIONS em 24/09). A `varejinho_lake` aponta para o bucket antigo e não é usada.
---    Escopo: a external location é o bucket inteiro (inclui bronze/), mais largo que
---    o control storage. Estreitar com um volume externo em _control/ é próximo passo.
-GRANT READ FILES, WRITE FILES ON EXTERNAL LOCATION `varejinho_lake_new` TO `bf71079b-64e1-4763-8b86-1e90718d8864`;
+-- 4) Control storage (baselines de schema drift, manifests de partição): o volume
+--    externo varejinho.control.control_files = s3://varejinho-lake/_control/, criado
+--    por ops/storage/control_volumes.sql (criar o volume antes deste GRANT).
+--    Nenhum privilégio na external location `varejinho_lake_new` = s3://varejinho-lake/,
+--    que inclui bronze/: a Bronze é lida só como tabela (seção 2).
+--    Histórico: até o lote pós-F9 o SP tinha READ FILES, WRITE FILES na external
+--    location inteira; a revogação e o rollback estão em ops/storage/control_volumes.sql.
+GRANT READ VOLUME, WRITE VOLUME ON VOLUME varejinho.control.control_files TO `bf71079b-64e1-4763-8b86-1e90718d8864`;
 
 -- 5) Ownership das tabelas clonadas (Silver/Gold/control) é transferida para o SP
 --    no runbook do cutover (ALTER TABLE ... OWNER TO), para que CREATE OR REPLACE
@@ -51,6 +53,7 @@ GRANT USE SCHEMA, SELECT ON SCHEMA varejinho.bronze  TO `varejinho-prod-readers`
 GRANT USE SCHEMA, SELECT ON SCHEMA varejinho.silver  TO `varejinho-prod-readers`;
 GRANT USE SCHEMA, SELECT ON SCHEMA varejinho.gold    TO `varejinho-prod-readers`;
 GRANT USE SCHEMA, SELECT ON SCHEMA varejinho.control TO `varejinho-prod-readers`;
+GRANT READ VOLUME ON VOLUME varejinho.control.control_files TO `varejinho-prod-readers`;
 
 -- 8) Fora do SQL: quem faz o `bundle deploy -t prod` precisa do papel
 --    "Service Principal: User" no SP (Settings -> Identity and access ->

@@ -33,12 +33,21 @@ def required_param(nome: str) -> str:
 CATALOG = job_param("catalog", "varejinho_dev")
 CONTROL_ROOT = job_param(
     "control_root",
-    "s3://varejinho-lake/_control/dev/r2_partition_manifest_fixture",
+    "/Volumes/varejinho_dev/control/control_files/r2_partition_manifest_fixture",
+).rstrip("/")
+# A Bronze simulada é uma tabela externa, e o Unity Catalog não aceita tabela sobre
+# caminho de volume. Por isso ela vive num prefixo do bucket fora de qualquer volume,
+# e só os manifests (o que está sob teste) ficam no control_root, que é um volume.
+SOURCE_ROOT = job_param(
+    "source_root",
+    "s3://varejinho-lake/_fixtures/dev/r2_partition_manifest_source",
 ).rstrip("/")
 BUNDLE_FILES_PATH = required_param("bundle_files_path").rstrip("/")
 
 if not CATALOG.endswith("_dev"):
     raise Exception(f"R2 fixture is dev-only. Received: {CATALOG}")
+if not SOURCE_ROOT.startswith("s3://varejinho-lake/_fixtures/"):
+    raise Exception(f"R2 source_root must be a fixture prefix outside any volume. Received: {SOURCE_ROOT}")
 
 ENGINE_PATH = f"{BUNDLE_FILES_PATH}/quality/partition_manifest.py"
 spec = importlib.util.spec_from_file_location("partition_manifest_fixture", ENGINE_PATH)
@@ -56,11 +65,12 @@ GUARD = FactPartitionManifestGuard(
     control_root=CONTROL_ROOT,
 )
 
-DATA_PATH = f"{CONTROL_ROOT}/source"
+DATA_PATH = SOURCE_ROOT
 SOURCE_TABLE = f"{CATALOG}.control._r2_partition_manifest_source"
 
-dbutils.fs.rm(CONTROL_ROOT, True)
 spark.sql(f"DROP TABLE IF EXISTS {SOURCE_TABLE}")
+dbutils.fs.rm(CONTROL_ROOT, True)
+dbutils.fs.rm(SOURCE_ROOT, True)
 spark.sql(f"CREATE SCHEMA IF NOT EXISTS {CATALOG}.control")
 
 
@@ -223,6 +233,7 @@ print(f"\n{passed}/{total} checks passed")
 
 spark.sql(f"DROP TABLE IF EXISTS {SOURCE_TABLE}")
 dbutils.fs.rm(CONTROL_ROOT, True)
+dbutils.fs.rm(SOURCE_ROOT, True)
 
 if passed != total:
     raise Exception(f"R2 fixture failed: {passed}/{total}")

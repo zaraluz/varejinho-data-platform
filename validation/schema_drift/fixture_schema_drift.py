@@ -55,7 +55,7 @@ def derive_bundle_files_path() -> str:
 
 CATALOG = job_param("catalog", "varejinho_dev")
 BUNDLE_FILES_PATH = job_param("bundle_files_path", derive_bundle_files_path())
-CONTROL_ROOT = job_param("control_root", "s3://varejinho-lake/_control/dev").rstrip("/")
+CONTROL_ROOT = job_param("control_root", "/Volumes/varejinho_dev/control/control_files").rstrip("/")
 
 if not CATALOG.endswith("_dev"):
     raise Exception(

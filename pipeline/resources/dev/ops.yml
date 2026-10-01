@@ -1092,8 +1092,11 @@ targets:
               default: ${var.catalog}
             - name: target_catalog
               default: varejinho
+            # Caminhos do cutover de 24/09, fixos: o job é histórico. Depois dele o
+            # control de dev foi para o volume varejinho_dev.control.control_files e
+            # _control/dev/ foi apagado (docs/runbooks/control_volume_migration.md).
             - name: source_control_root
-              default: ${var.control_root}
+              default: s3://varejinho-lake/_control/dev
             - name: target_control_root
               default: s3://varejinho-lake/_control
             - name: legacy_control_root
@@ -1105,3 +1108,30 @@ targets:
               notebook_task:
                 notebook_path: ${workspace.file_path}/ops/cutover/production_cutover.py
               description: "Um passo do cutover (plan, backup, clone, verify, ownership, rollback); dry_run por padrão"
+
+        migrate_dev_control_root:
+          # Move o control de dev de s3://varejinho-lake/_control/dev para o volume
+          # varejinho_dev.control.control_files, para que prod possa ter um volume em
+          # _control/ (volumes não se sobrepõem). Roda como a operadora, um passo por
+          # execução, dry_run por padrão. Runbook: docs/runbooks/control_volume_migration.md.
+          name: "[${bundle.target}] Varejinho — Ops Migrate Dev Control Root"
+          tags:
+            purpose: ops
+            block: storage
+          max_concurrent_runs: 1
+          parameters:
+            - name: step
+              default: plan
+            - name: dry_run
+              default: "true"
+            - name: confirm_target
+              default: "-"
+            - name: source_root
+              default: s3://varejinho-lake/_control/dev
+            - name: target_root
+              default: ${var.control_root}
+          tasks:
+            - task_key: migrate_step
+              notebook_task:
+                notebook_path: ${workspace.file_path}/ops/storage/migrate_dev_control_root.py
+              description: "Um passo da migração (plan, copy, verify, delete); dry_run por padrão"

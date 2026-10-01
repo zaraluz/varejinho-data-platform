@@ -33,7 +33,7 @@ def required_param(nome: str) -> str:
 CATALOG = job_param("catalog", "varejinho_dev")
 ENTITY = job_param("entity", "all")
 BUNDLE_FILES_PATH = required_param("bundle_files_path").rstrip("/")
-CONTROL_ROOT = job_param("control_root", "s3://varejinho-lake/_control/dev").rstrip("/")
+CONTROL_ROOT = job_param("control_root", "/Volumes/varejinho_dev/control/control_files").rstrip("/")
 BRONZE_SOURCE_CATALOG = job_param("bronze_source_catalog", "varejinho")
 CONTROL_TABLE = job_param("control_table", f"{CATALOG}.control.fact_watermark")
 BRONZE_OVERRIDE = job_param("bronze_table", "")
